@@ -35,8 +35,9 @@ def save_data_to_sheets(df):
     client = get_gspread_client()
     sheet = client.open(SPREADSHEET_NAME).sheet1
     sheet.clear()
-    sheet.update([df.columns.values.tolist()] + df.values.tolist())
-
+    # すべてのデータを一度文字列(str)に変換してから送るようにします
+    data_to_save = [df.columns.values.tolist()] + df.astype(str).values.tolist()
+    sheet.update(data_to_save)
 # --- 以下、これまでのアプリ機能 ---
 st.title("レオパ管理システム (Cloud Sync版)")
 
@@ -89,3 +90,4 @@ else:
     if st.sidebar.button("ログアウト"):
         st.session_state.authenticated = False
         st.rerun()
+
