@@ -35,12 +35,14 @@ def save_data_to_sheets(df):
     client = get_gspread_client()
     sheet = client.open(SPREADSHEET_NAME).sheet1
     sheet.clear()
-    # すべてのデータを一度文字列(str)に変換してから送るようにします
-    data_to_save = [df.columns.values.tolist()] + df.astype(str).values.tolist()
-    sheet.update(data_to_save)
-# --- 以下、これまでのアプリ機能 ---
-st.title("レオパ管理システム (Cloud Sync版)")
-
+    
+    # 列の名前（ヘッダー）をリストにする
+    header = df.columns.values.tolist()
+    # 全データを文字列に変換し、リストのリスト形式にする
+    values = df.astype(str).values.tolist()
+    
+    # まとめて更新（この書き方が最新の安定版です）
+    sheet.update(range_name='A1', values=[header] + values)
 # パスワード認証
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
@@ -90,4 +92,5 @@ else:
     if st.sidebar.button("ログアウト"):
         st.session_state.authenticated = False
         st.rerun()
+
 
