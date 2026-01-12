@@ -77,7 +77,7 @@ def main():
                 morph = st.text_input("モルフ")
                 birth = st.date_input("生年月日")
                 gender = st.selectbox("性別", ["不明", "オス", "メス"])
-                quality = st.select_slider("クオリティ", options=["★A", "★B", "★C", "★D", "★E"])
+                quality = st.select_slider("クオリティ", options=["★S", "★A+", "★A", "★B+", "★B"])
                 
                 # 画像選択ボタン（カメラ起動・フォルダ選択が可能になります）
                 img_file1 = st.file_uploader("画像1枚目を選択", type=["jpg", "jpeg", "png"])
@@ -103,4 +103,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
