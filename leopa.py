@@ -11,13 +11,13 @@ VIEW_PASSWORD = "andgekko"
 SPREADSHEET_NAME = "leopa_database"
 
 # --- デザイン設定（&Gekkoカラー） ---
-st.set_page_config(page_title="&Gekko Leopa Log", layout="centered")
+st.set_page_config(page_title="&Gekko レオパログ", layout="centered")
 
 st.markdown("""
     <style>
     .stApp { background-color: #ffffff; }
     [data-testid="stSidebar"] { background-color: #81d1d1; }
-    h1, h2, h3 { color: #000000 !important; font-family: 'Serif'; }
+    h1, h2, h3 { color: #000000 !important; }
     .stButton>button {
         background-color: #81d1d1;
         color: white;
@@ -59,40 +59,39 @@ def convert_image(file):
 
 # --- メイン処理 ---
 def main():
-    st.title("🦎 &Gekko Leopa Log")
+    st.title("🦎 &Gekko レオパログ")
 
     if "logged_in" not in st.session_state:
         st.session_state.update({"logged_in": False, "is_admin": False})
 
     if not st.session_state["logged_in"]:
-        pwd = st.text_input("Password", type="password")
-        if st.button("Login"):
+        pwd = st.text_input("パスワードを入力してください", type="password")
+        if st.button("ログイン"):
             if pwd == ADMIN_PASSWORD:
                 st.session_state.update({"logged_in": True, "is_admin": True})
                 st.rerun()
             elif pwd == VIEW_PASSWORD:
                 st.session_state.update({"logged_in": True, "is_admin": False})
                 st.rerun()
-            else: st.error("Incorrect password")
+            else: st.error("パスワードが違います")
     else:
-        menu = ["Data List"]
-        if st.session_state["is_admin"]: menu.append("Register")
-        choice = st.sidebar.selectbox("Menu", menu)
+        # メニューの日本語化
+        menu = ["データ一覧"]
+        if st.session_state["is_admin"]: menu.append("新規登録")
+        choice = st.sidebar.selectbox("メニュー", menu)
 
-        if choice == "Data List":
+        if choice == "データ一覧":
             df = load_data()
             if df.empty:
-                st.info("データがありません。")
+                st.info("登録されているデータがありません。")
             else:
-                # --- ここがポイント：管理者以外には「非公開」を隠す ---
+                # 管理者以外には非公開データを隠す
                 if not st.session_state["is_admin"]:
-                    # 「非公開」列が TRUE または "True" のものを除外
                     df = df[df["非公開"] != "True"]
                 
                 for idx, row in df.iterrows():
                     with st.container():
                         st.markdown("---")
-                        # 管理者には非公開バッジを表示
                         if st.session_state["is_admin"] and str(row.get("非公開")) == "True":
                             st.warning("🔒 このデータは自分専用（非公開）です")
 
@@ -105,25 +104,24 @@ def main():
                         with c2:
                             st.write(f"**父:** {row['父親のモルフ']}({row['父親のID']})\n\n**母:** {row['母親のモルフ']}({row['母親のID']})")
                         
-                        if row["備考"]: st.info(f"Memo: {row['備考']}")
+                        if row["備考"]: st.info(f"備考: {row['備考']}")
                         if row.get("画像2"):
-                            with st.expander("Show Photo 2"): st.image(f"data:image/jpeg;base64,{row['画像2']}", use_container_width=True)
+                            with st.expander("2枚目の写真を見る"): st.image(f"data:image/jpeg;base64,{row['画像2']}", use_container_width=True)
                         
                         if st.session_state["is_admin"]:
                             ec1, ec2 = st.columns(2)
-                            if ec1.button("Edit (編集)", key=f"edit_btn_{idx}"):
+                            if ec1.button("編集", key=f"edit_btn_{idx}"):
                                 st.session_state["edit_idx"] = idx
-                            if ec2.button("Delete (削除)", key=f"del_btn_{idx}"):
+                            if ec2.button("削除", key=f"del_btn_{idx}"):
                                 df = df.drop(idx)
                                 save_all_data(df)
-                                st.success("Deleted.")
+                                st.success("削除しました。")
                                 st.rerun()
                             
                             if st.session_state.get("edit_idx") == idx:
                                 st.markdown('<div class="edit-box">', unsafe_allow_html=True)
                                 with st.form(f"form_{idx}"):
                                     st.write("### データの編集")
-                                    # --- 非公開設定（編集） ---
                                     u_private = st.checkbox("このレオパを自分以外には見せない（非公開）", value=(str(row.get("非公開")) == "True"))
                                     u_id = st.text_input("ID", value=row["ID"])
                                     u_mo = st.text_input("モルフ", value=row["モルフ"])
@@ -138,7 +136,7 @@ def main():
                                     u_im1 = st.file_uploader("画像1を差し替える", type=["jpg", "jpeg", "png"])
                                     u_im2 = st.file_uploader("画像2を差し替える", type=["jpg", "jpeg", "png"])
                                     
-                                    if st.form_submit_button("Update (更新)"):
+                                    if st.form_submit_button("更新する"):
                                         df.at[idx, "ID"] = u_id
                                         df.at[idx, "モルフ"] = u_mo
                                         df.at[idx, "生年月日"] = u_bi
@@ -154,14 +152,13 @@ def main():
                                         if u_im2: df.at[idx, "画像2"] = convert_image(u_im2)
                                         save_all_data(df)
                                         st.session_state["edit_idx"] = None
-                                        st.success("Updated!")
+                                        st.success("更新しました！")
                                         st.rerun()
                                 st.markdown('</div>', unsafe_allow_html=True)
 
-        elif choice == "Register":
-            st.subheader("New Registration")
+        elif choice == "新規登録":
+            st.subheader("新しいレオパを登録")
             with st.form("reg_form", clear_on_submit=True):
-                # --- 非公開設定（新規） ---
                 is_private = st.checkbox("このレオパを自分以外には見せない（非公開）")
                 id_v = st.text_input("ID")
                 mo = st.text_input("モルフ")
@@ -170,20 +167,20 @@ def main():
                 qu = st.select_slider("クオリティ", options=["★1", "★2", "★3", "★4", "★5"])
                 f_m = st.text_input("父モルフ"); f_i = st.text_input("父ID")
                 m_m = st.text_input("母モルフ"); m_i = st.text_input("母ID")
-                im1 = st.file_uploader("Photo 1"); im2 = st.file_uploader("Photo 2")
+                im1 = st.file_uploader("画像1枚目を選択"); im2 = st.file_uploader("画像2枚目を選択")
                 no = st.text_area("備考")
                 
-                if st.form_submit_button("Save"):
+                if st.form_submit_button("保存する"):
                     df = load_data()
                     new_row = {
                         "ID":id_v, "モルフ":mo, "生年月日":bi, "性別":ge, "クオリティ":qu, 
                         "父親のモルフ":f_m, "父親のID":f_i, "母親のモルフ":m_m, "母親のID":m_i, 
                         "画像1":convert_image(im1), "画像2":convert_image(im2), "備考":no,
-                        "非公開": str(is_private) # 保存
+                        "非公開": str(is_private)
                     }
                     df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
                     save_all_data(df)
-                    st.success("Saved!")
+                    st.success("保存しました！")
 
 if __name__ == "__main__":
     main()
