@@ -10,28 +10,63 @@ ADMIN_PASSWORD = "lucafk"
 VIEW_PASSWORD = "andgekko"
 SPREADSHEET_NAME = "leopa_database"
 
-# --- デザイン設定（&Gekkoカラー） ---
+# --- デザイン設定（&Gekkoカラー強化版） ---
 st.set_page_config(page_title="&Gekko レオパログ", layout="centered")
 
 st.markdown("""
     <style>
+    /* 全体の背景 */
     .stApp { background-color: #ffffff; }
-    [data-testid="stSidebar"] { background-color: #81d1d1; }
-    h1, h2, h3 { color: #000000 !important; }
+    
+    /* サイドバー（メニュー）をミントグリーンで塗りつぶし */
+    [data-testid="stSidebar"] {
+        background-color: #81d1d1 !important;
+    }
+    
+    /* サイドバー内の文字色を黒で読みやすく */
+    [data-testid="stSidebar"] .stText, [data-testid="stSidebar"] label, [data-testid="stSidebar"] .stSelectbox div {
+        color: #000000 !important;
+        font-weight: bold;
+    }
+
+    /* タイトルエリアをミントグリーンの背景に（割合を増やす工夫） */
+    .main-header {
+        background-color: #81d1d1;
+        padding: 20px;
+        border-radius: 0px 0px 20px 20px;
+        margin-bottom: 30px;
+        text-align: center;
+        color: white;
+    }
+
+    /* ボタンのデザインを強化 */
     .stButton>button {
         background-color: #81d1d1;
         color: white;
-        border-radius: 20px;
-        border: none;
-        width: 100%;
+        border-radius: 25px;
+        border: 2px solid #81d1d1;
+        font-weight: bold;
+        padding: 0.5rem 1rem;
+        transition: 0.3s;
     }
-    .stTextInput>div>div>input { border-color: #81d1d1; }
+    .stButton>button:hover {
+        background-color: white;
+        color: #81d1d1;
+        border: 2px solid #81d1d1;
+    }
+
+    /* 入力欄の枠線 */
+    .stTextInput>div>div>input, .stTextArea>div>div>textarea {
+        border-color: #81d1d1;
+    }
+
+    /* 編集ボックスの背景を薄いミントに */
     .edit-box {
         padding: 20px;
         border: 2px solid #81d1d1;
-        border-radius: 10px;
-        background-color: #f9fefed;
-        margin-bottom: 20px;
+        border-radius: 15px;
+        background-color: #f0fafa;
+        margin-bottom: 25px;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -59,7 +94,8 @@ def convert_image(file):
 
 # --- メイン処理 ---
 def main():
-    st.title("🦎 &Gekko レオパログ")
+    # ヘッダーデザイン（ミントグリーンの割合を増やす）
+    st.markdown('<div class="main-header"><h1>🦎 &Gekko レオパログ</h1></div>', unsafe_allow_html=True)
 
     if "logged_in" not in st.session_state:
         st.session_state.update({"logged_in": False, "is_admin": False})
@@ -75,17 +111,20 @@ def main():
                 st.rerun()
             else: st.error("パスワードが違います")
     else:
-        # メニューの日本語化
-        menu = ["データ一覧"]
-        if st.session_state["is_admin"]: menu.append("新規登録")
-        choice = st.sidebar.selectbox("メニュー", menu)
+        # メニュー設定
+        menu_options = ["データ一覧"]
+        if st.session_state["is_admin"]:
+            menu_options.append("新規登録")
+        
+        # サイドバーのデザイン変更
+        st.sidebar.markdown("### &Gekko メニュー")
+        choice = st.sidebar.radio("項目を選択してください", menu_options)
 
         if choice == "データ一覧":
             df = load_data()
             if df.empty:
                 st.info("登録されているデータがありません。")
             else:
-                # 管理者以外には非公開データを隠す
                 if not st.session_state["is_admin"]:
                     df = df[df["非公開"] != "True"]
                 
@@ -93,10 +132,10 @@ def main():
                     with st.container():
                         st.markdown("---")
                         if st.session_state["is_admin"] and str(row.get("非公開")) == "True":
-                            st.warning("🔒 このデータは自分専用（非公開）です")
+                            st.warning("🔒 非公開データ")
 
                         if row.get("画像1"): st.image(f"data:image/jpeg;base64,{row['画像1']}", use_container_width=True)
-                        st.markdown(f"### ID: {row['ID']} / {row['モルフ']}")
+                        st.markdown(f"## ID: {row['ID']} / {row['モルフ']}")
                         
                         c1, c2 = st.columns(2)
                         with c1:
@@ -115,17 +154,17 @@ def main():
                             if ec2.button("削除", key=f"del_btn_{idx}"):
                                 df = df.drop(idx)
                                 save_all_data(df)
-                                st.success("削除しました。")
+                                st.success("削除完了")
                                 st.rerun()
                             
                             if st.session_state.get("edit_idx") == idx:
                                 st.markdown('<div class="edit-box">', unsafe_allow_html=True)
                                 with st.form(f"form_{idx}"):
-                                    st.write("### データの編集")
-                                    u_private = st.checkbox("このレオパを自分以外には見せない（非公開）", value=(str(row.get("非公開")) == "True"))
+                                    st.write("### 修正フォーム")
+                                    u_private = st.checkbox("非公開にする", value=(str(row.get("非公開")) == "True"))
                                     u_id = st.text_input("ID", value=row["ID"])
                                     u_mo = st.text_input("モルフ", value=row["モルフ"])
-                                    u_bi = st.text_input("生年月日 (YYYY-MM-DD)", value=row["生年月日"])
+                                    u_bi = st.text_input("生年月日", value=row["生年月日"])
                                     u_ge = st.selectbox("性別", ["不明", "オス", "メス"], index=["不明", "オス", "メス"].index(row["性別"]))
                                     u_qu = st.select_slider("クオリティ", options=["★1", "★2", "★3", "★4", "★5"], value=row["クオリティ"])
                                     u_fm = st.text_input("父モルフ", value=row["父親のモルフ"])
@@ -133,10 +172,10 @@ def main():
                                     u_mm = st.text_input("母モルフ", value=row["母親のモルフ"])
                                     u_mi = st.text_input("母ID", value=row["母親のID"])
                                     u_no = st.text_area("備考", value=row["備考"])
-                                    u_im1 = st.file_uploader("画像1を差し替える", type=["jpg", "jpeg", "png"])
-                                    u_im2 = st.file_uploader("画像2を差し替える", type=["jpg", "jpeg", "png"])
+                                    u_im1 = st.file_uploader("画像1差し替え", type=["jpg", "jpeg", "png"])
+                                    u_im2 = st.file_uploader("画像2差し替え", type=["jpg", "jpeg", "png"])
                                     
-                                    if st.form_submit_button("更新する"):
+                                    if st.form_submit_button("この内容で更新"):
                                         df.at[idx, "ID"] = u_id
                                         df.at[idx, "モルフ"] = u_mo
                                         df.at[idx, "生年月日"] = u_bi
@@ -152,14 +191,13 @@ def main():
                                         if u_im2: df.at[idx, "画像2"] = convert_image(u_im2)
                                         save_all_data(df)
                                         st.session_state["edit_idx"] = None
-                                        st.success("更新しました！")
                                         st.rerun()
                                 st.markdown('</div>', unsafe_allow_html=True)
 
         elif choice == "新規登録":
             st.subheader("新しいレオパを登録")
             with st.form("reg_form", clear_on_submit=True):
-                is_private = st.checkbox("このレオパを自分以外には見せない（非公開）")
+                is_private = st.checkbox("非公開にする")
                 id_v = st.text_input("ID")
                 mo = st.text_input("モルフ")
                 bi = st.date_input("生年月日")
@@ -167,10 +205,10 @@ def main():
                 qu = st.select_slider("クオリティ", options=["★1", "★2", "★3", "★4", "★5"])
                 f_m = st.text_input("父モルフ"); f_i = st.text_input("父ID")
                 m_m = st.text_input("母モルフ"); m_i = st.text_input("母ID")
-                im1 = st.file_uploader("画像1枚目を選択"); im2 = st.file_uploader("画像2枚目を選択")
+                im1 = st.file_uploader("画像1を選択"); im2 = st.file_uploader("画像2を選択")
                 no = st.text_area("備考")
                 
-                if st.form_submit_button("保存する"):
+                if st.form_submit_button("新しく保存する"):
                     df = load_data()
                     new_row = {
                         "ID":id_v, "モルフ":mo, "生年月日":bi, "性別":ge, "クオリティ":qu, 
@@ -180,7 +218,7 @@ def main():
                     }
                     df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
                     save_all_data(df)
-                    st.success("保存しました！")
+                    st.success("保存完了！")
 
 if __name__ == "__main__":
     main()
