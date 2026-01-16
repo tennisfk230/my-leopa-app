@@ -14,22 +14,22 @@ SPREADSHEET_NAME = "leopa_database"
 
 st.set_page_config(page_title="&Gekko Album", layout="wide")
 
-# 【最終修正版】サイドバーを毎回確実に、かつ右上メニューを汚さずに閉じる魔法
-def close_sidebar_final():
-    html("""
+# 【決定版】サイドバーを確実に閉じ、右上の誤爆を防ぐ関数
+def close_sidebar_perfect(menu_name):
+    # メニュー名ごとに異なるkeyを持たせることで、毎回実行させます
+    html(f"""
         <script>
-        // 0.1秒だけ待ってから実行（ページの読み込み完了に合わせる）
-        setTimeout(function() {
-            const sidebar = window.parent.document.querySelector('[data-testid="stSidebar"]');
-            const closeButton = window.parent.document.querySelector('button[aria-label="Close sidebar"]');
-            
-            // サイドバーが開いている（isVisible）時だけ、閉じるボタンを押す
-            if (sidebar && closeButton) {
-                closeButton.click();
-            }
-        }, 100);
+        const attemptClose = () => {{
+            // 右上のメニューではなく、サイドバー内の「×ボタン」をピンポイントで探す
+            const closeBtn = window.parent.document.querySelector('button[aria-label="Close sidebar"]');
+            if (closeBtn) {{
+                closeBtn.click();
+            }}
+        }};
+        // 0.3秒待ってから実行（スマホの描画ラグを考慮）
+        setTimeout(attemptClose, 300);
         </script>
-    """, height=0)
+    """, height=0, key=f"close_js_{menu_name}")
 
 st.markdown("""
     <style>
@@ -117,14 +117,12 @@ def main():
             else: st.error("パスワードが違います")
     else:
         menu_options = ["アルバム一覧", "新規登録"] if st.session_state["is_admin"] else ["アルバム一覧"]
-        
-        # サイドバーでメニューを選択
         choice = st.sidebar.radio("メニュー", menu_options)
 
-        # 選択が変わったときだけ魔法を発動
+        # ★ ここで魔法を発動 ★
         if st.session_state["prev_choice"] != choice:
             st.session_state["prev_choice"] = choice
-            close_sidebar_final()
+            close_sidebar_perfect(choice)
 
         if choice == "アルバム一覧":
             df = load_data()
