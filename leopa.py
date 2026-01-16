@@ -16,26 +16,44 @@ st.set_page_config(page_title="&Gekko Album", layout="wide")
 # --- 2. デザイン（CSS） ---
 st.markdown("""
     <style>
+    /* 全体の背景 */
     .stApp { background-color: #ffffff; }
-    [data-testid="stSidebar"] { background-color: #81d1d1 !important; }
+    
+    /* ヘッダーロゴ部分 */
     .header-container {
         text-align: center;
-        margin: -70px -50px 30px -50px;
+        margin: -70px -50px 0px -50px;
         background-color: #000000;
         border-bottom: 4px solid #81d1d1;
     }
+
+    /* メニューボタン（横並び）のデザイン */
+    div.stRadio > div {
+        flex-direction: row;
+        justify-content: center;
+        background-color: #f0fafa;
+        padding: 10px 0;
+        border-bottom: 1px solid #81d1d1;
+        margin-bottom: 20px;
+    }
+    div.stRadio div[data-testid="stMarkdownContainer"] > p {
+        font-size: 1.1rem !important;
+        font-weight: bold;
+    }
+
+    /* インスタ風カード */
     .leopa-card {
         border: 1px solid #e0f2f2;
-        border-radius: 10px;
+        border-radius: 12px;
         background-color: white;
         box-shadow: 0 4px 6px rgba(0,0,0,0.05);
         margin-bottom: 20px;
+        overflow: hidden;
     }
     .img-container {
         width: 100%;
         aspect-ratio: 1 / 1;
         overflow: hidden;
-        border-radius: 10px 10px 0 0;
     }
     .img-container img {
         width: 100%;
@@ -43,13 +61,12 @@ st.markdown("""
         object-fit: cover;
     }
     .card-text { padding: 10px; text-align: center; }
-    .card-id { font-weight: bold; color: #333; font-size: 0.9rem; }
-    .card-morph { color: #81d1d1; font-size: 0.8rem; font-weight: bold; }
-    .stButton>button {
-        background-color: #81d1d1 !important;
-        color: white !important;
-        border-radius: 20px !important;
-    }
+    .card-id { font-weight: bold; color: #333; font-size: 1rem; }
+    .card-morph { color: #81d1d1; font-size: 0.85rem; font-weight: bold; }
+
+    /* サイドバーを完全に隠す（不要になったため） */
+    [data-testid="stSidebar"] { display: none; }
+    [data-testid="collapsedControl"] { display: none; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -86,33 +103,23 @@ def main():
         st.markdown('</div>', unsafe_allow_html=True)
 
     if "logged_in" not in st.session_state:
-        st.session_state.update({"logged_in": False, "is_admin": False, "prev_choice": "アルバム一覧"})
+        st.session_state.update({"logged_in": False, "is_admin": False})
 
     if not st.session_state["logged_in"]:
-        pwd = st.text_input("パスワード", type="password")
+        st.write("### ログイン")
+        pwd = st.text_input("パスワードを入力", type="password")
         if st.button("ログイン"):
             if pwd == ADMIN_PASSWORD:
-                st.session_state.update({"logged_in": True, "is_admin": True})
-                st.rerun()
+                st.session_state.update({"logged_in": True, "is_admin": True}); st.rerun()
             elif pwd == VIEW_PASSWORD:
-                st.session_state.update({"logged_in": True, "is_admin": False})
-                st.rerun()
+                st.session_state.update({"logged_in": True, "is_admin": False}); st.rerun()
             else: st.error("パスワードが違います")
     else:
-        # メニュー（日本語）
-        menu_options = ["アルバム一覧", "新規登録"] if st.session_state["is_admin"] else ["アルバム一覧"]
-        choice = st.sidebar.radio("メニューを選択", menu_options)
+        # 【新案】画面上部にメニューを配置
+        menu_options = ["🏠 アルバム一覧", "➕ 新規登録"] if st.session_state["is_admin"] else ["🏠 アルバム一覧"]
+        choice = st.radio("", menu_options, horizontal=True)
 
-        # 【最新・安全版】サイドバー自動閉鎖の魔法
-        if st.session_state["prev_choice"] != choice:
-            st.session_state["prev_choice"] = choice
-            st.components.v1.html("""
-                <script>
-                window.parent.document.querySelector('button[aria-label="Close sidebar"]').click();
-                </script>
-            """, height=0)
-
-        if choice == "アルバム一覧":
+        if "アルバム一覧" in choice:
             df = load_data()
             if df.empty:
                 st.info("データがありません。")
@@ -121,9 +128,9 @@ def main():
                     if "非公開" in df.columns:
                         df = df[df["非公開"] != "True"]
 
-                cols = st.columns(3) 
+                cols = st.columns(2) # スマホで見やすいよう2列に
                 for idx, row in df.iterrows():
-                    with cols[idx % 3]:
+                    with cols[idx % 2]:
                         st.markdown(f"""
                             <div class="leopa-card">
                                 <div class="img-container">
@@ -135,7 +142,7 @@ def main():
                                 </div>
                             </div>
                         """, unsafe_allow_html=True)
-                        with st.expander("詳細を見る"):
+                        with st.expander("詳細"):
                             st.write(f"**性別:** {row.get('性別', '-')}")
                             st.write(f"**誕生日:** {row.get('生年月日', '-')}")
                             if row.get("画像2"):
@@ -144,7 +151,7 @@ def main():
                                 if st.button("削除", key=f"del_{idx}"):
                                     save_all_data(df.drop(idx)); st.rerun()
 
-        elif choice == "新規登録":
+        elif "新規登録" in choice:
             st.subheader("新しいレオパを登録")
             with st.form("reg_form", clear_on_submit=True):
                 is_p = st.checkbox("非公開にする")
@@ -153,11 +160,8 @@ def main():
                 bi = st.date_input("生年月日")
                 ge = st.selectbox("性別", ["不明", "オス", "メス"])
                 qu = st.select_slider("クオリティ", options=["S", "A", "B", "C", ])
-                
-                # 画像2枚対応
-                im1 = st.file_uploader("画像1枚目を選択", type=["jpg", "jpeg", "png"])
-                im2 = st.file_uploader("画像2枚目を選択", type=["jpg", "jpeg", "png"])
-                
+                im1 = st.file_uploader("画像1枚目", type=["jpg", "jpeg", "png"])
+                im2 = st.file_uploader("画像2枚目", type=["jpg", "jpeg", "png"])
                 no = st.text_area("備考")
                 if st.form_submit_button("保存する"):
                     df_new = load_data()
