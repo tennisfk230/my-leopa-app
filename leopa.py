@@ -12,15 +12,23 @@ ADMIN_PASSWORD = "lucafk"
 VIEW_PASSWORD = "andgekko"
 SPREADSHEET_NAME = "leopa_database"
 
-# --- デザイン設定（&Gekko アルバムスタイル） ---
 st.set_page_config(page_title="&Gekko Album", layout="wide")
 
-# 【魔法の実装】サイドバーを閉じるJavaScript
+# 【強化版】サイドバーを閉じるJavaScript
 def close_sidebar():
     html("""
         <script>
-        var v = window.parent.document.querySelector('button[kind="headerNoPadding"]');
-        if (v) { v.click(); }
+        // ボタンの複数の候補を探して、最初に見つかったものをクリックする
+        const selectors = [
+            'button[kind="headerNoPadding"]',
+            'button[aria-label="Close sidebar"]',
+            '.st-emotion-cache-18ni7ve', 
+            '.st-emotion-cache-164nlkn'
+        ];
+        
+        window.parent.document.querySelectorAll(selectors.join(',')).forEach(btn => {
+            if (btn) { btn.click(); }
+        });
         </script>
     """, height=0)
 
@@ -39,15 +47,9 @@ st.markdown("""
     .leopa-card {
         border: 1px solid #e0f2f2;
         border-radius: 10px;
-        padding: 0px;
         background-color: white;
         box-shadow: 0 4px 6px rgba(0,0,0,0.05);
         margin-bottom: 20px;
-        transition: 0.3s;
-    }
-    .leopa-card:hover {
-        transform: translateY(-5px);
-        box-shadow: 0 10px 15px rgba(129, 209, 209, 0.3);
     }
 
     .img-container {
@@ -74,7 +76,6 @@ st.markdown("""
         color: white !important;
         border-radius: 20px !important;
         border: none !important;
-        font-size: 0.8rem !important;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -103,7 +104,7 @@ def main():
         st.markdown('</div>', unsafe_allow_html=True)
 
     if "logged_in" not in st.session_state:
-        st.session_state.update({"logged_in": False, "is_admin": False, "prev_choice": None})
+        st.session_state.update({"logged_in": False, "is_admin": False, "prev_choice": "アルバム一覧"})
 
     if not st.session_state["logged_in"]:
         pwd = st.text_input("パスワード", type="password")
@@ -118,16 +119,13 @@ def main():
     else:
         menu_options = ["アルバム一覧", "新規登録"] if st.session_state["is_admin"] else ["アルバム一覧"]
         
-        # サイドバーでの選択
+        # サイドバーでメニューを選択
         choice = st.sidebar.radio("メニュー", menu_options)
 
-        # 【魔法の発動場所】
-        # 前回選択したものと違うメニューが選ばれたら、サイドバーを閉じる
-        if "prev_choice" in st.session_state and st.session_state["prev_choice"] != choice:
-            close_sidebar()
-        
-        # 現在の選択を記録
-        st.session_state["prev_choice"] = choice
+        # 【修正】セッション状態を使って、メニューが切り替わったタイミングを検知
+        if st.session_state["prev_choice"] != choice:
+            st.session_state["prev_choice"] = choice
+            close_sidebar()  # ここでJSを実行
 
         if choice == "アルバム一覧":
             df = load_data()
