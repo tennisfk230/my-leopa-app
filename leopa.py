@@ -14,21 +14,20 @@ SPREADSHEET_NAME = "leopa_database"
 
 st.set_page_config(page_title="&Gekko Album", layout="wide")
 
-# 【強化版】サイドバーを閉じるJavaScript
-def close_sidebar():
+# 【最終修正版】サイドバーを毎回確実に、かつ右上メニューを汚さずに閉じる魔法
+def close_sidebar_final():
     html("""
         <script>
-        // ボタンの複数の候補を探して、最初に見つかったものをクリックする
-        const selectors = [
-            'button[kind="headerNoPadding"]',
-            'button[aria-label="Close sidebar"]',
-            '.st-emotion-cache-18ni7ve', 
-            '.st-emotion-cache-164nlkn'
-        ];
-        
-        window.parent.document.querySelectorAll(selectors.join(',')).forEach(btn => {
-            if (btn) { btn.click(); }
-        });
+        // 0.1秒だけ待ってから実行（ページの読み込み完了に合わせる）
+        setTimeout(function() {
+            const sidebar = window.parent.document.querySelector('[data-testid="stSidebar"]');
+            const closeButton = window.parent.document.querySelector('button[aria-label="Close sidebar"]');
+            
+            // サイドバーが開いている（isVisible）時だけ、閉じるボタンを押す
+            if (sidebar && closeButton) {
+                closeButton.click();
+            }
+        }, 100);
         </script>
     """, height=0)
 
@@ -122,10 +121,10 @@ def main():
         # サイドバーでメニューを選択
         choice = st.sidebar.radio("メニュー", menu_options)
 
-        # 【修正】セッション状態を使って、メニューが切り替わったタイミングを検知
+        # 選択が変わったときだけ魔法を発動
         if st.session_state["prev_choice"] != choice:
             st.session_state["prev_choice"] = choice
-            close_sidebar()  # ここでJSを実行
+            close_sidebar_final()
 
         if choice == "アルバム一覧":
             df = load_data()
