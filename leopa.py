@@ -13,17 +13,22 @@ VIEW_PASSWORD = "andgekko"
 SPREADSHEET_NAME = "leopa_database"
 
 # --- デザイン設定（&Gekko アルバムスタイル） ---
-st.set_page_config(page_title="&Gekko Album", layout="wide") # 広く使うためにwideに設定
+st.set_page_config(page_title="&Gekko Album", layout="wide")
 
+# 【魔法の実装】サイドバーを閉じるJavaScript
 def close_sidebar():
-    html("""<script>var v = window.parent.document.querySelector('button[kind="headerNoPadding"]'); if (v) { v.click(); }</script>""", height=0)
+    html("""
+        <script>
+        var v = window.parent.document.querySelector('button[kind="headerNoPadding"]');
+        if (v) { v.click(); }
+        </script>
+    """, height=0)
 
 st.markdown("""
     <style>
     .stApp { background-color: #ffffff; }
     [data-testid="stSidebar"] { background-color: #81d1d1 !important; }
     
-    /* ヘッダー */
     .header-container {
         text-align: center;
         margin: -70px -50px 30px -50px;
@@ -31,7 +36,6 @@ st.markdown("""
         border-bottom: 4px solid #81d1d1;
     }
 
-    /* インスタ風カードデザイン */
     .leopa-card {
         border: 1px solid #e0f2f2;
         border-radius: 10px;
@@ -46,7 +50,6 @@ st.markdown("""
         box-shadow: 0 10px 15px rgba(129, 209, 209, 0.3);
     }
 
-    /* 画像を正方形に整える */
     .img-container {
         width: 100%;
         aspect-ratio: 1 / 1;
@@ -59,7 +62,6 @@ st.markdown("""
         object-fit: cover;
     }
 
-    /* テキスト部分 */
     .card-text {
         padding: 10px;
         text-align: center;
@@ -67,7 +69,6 @@ st.markdown("""
     .card-id { font-weight: bold; color: #333; font-size: 0.9rem; }
     .card-morph { color: #81d1d1; font-size: 0.8rem; font-weight: bold; }
 
-    /* ボタン類 */
     .stButton>button {
         background-color: #81d1d1 !important;
         color: white !important;
@@ -78,7 +79,6 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- 共通関数（省略なしでそのままお使いください） ---
 def get_gspread_client():
     scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
     service_account_info = json.loads(st.secrets["GCP_SERVICE_ACCOUNT_JSON"])
@@ -96,29 +96,38 @@ def save_all_data(df):
     sheet.clear()
     sheet.update(range_name='A1', values=[df.columns.values.tolist()] + df.astype(str).values.tolist())
 
-# --- メイン処理 ---
 def main():
-    # ヘッダー表示
     if os.path.exists("logo_gekko.png"):
         st.markdown('<div class="header-container">', unsafe_allow_html=True)
         st.image("logo_gekko.png", use_container_width=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
     if "logged_in" not in st.session_state:
-        st.session_state.update({"logged_in": False, "is_admin": False, "prev_choice": "データ一覧"})
+        st.session_state.update({"logged_in": False, "is_admin": False, "prev_choice": None})
 
     if not st.session_state["logged_in"]:
         pwd = st.text_input("パスワード", type="password")
         if st.button("ログイン"):
-            if pwd == ADMIN_PASSWORD: st.session_state.update({"logged_in": True, "is_admin": True}); st.rerun()
-            elif pwd == VIEW_PASSWORD: st.session_state.update({"logged_in": True, "is_admin": False}); st.rerun()
+            if pwd == ADMIN_PASSWORD:
+                st.session_state.update({"logged_in": True, "is_admin": True})
+                st.rerun()
+            elif pwd == VIEW_PASSWORD:
+                st.session_state.update({"logged_in": True, "is_admin": False})
+                st.rerun()
             else: st.error("パスワードが違います")
     else:
         menu_options = ["アルバム一覧", "新規登録"] if st.session_state["is_admin"] else ["アルバム一覧"]
+        
+        # サイドバーでの選択
         choice = st.sidebar.radio("メニュー", menu_options)
-        if choice != st.session_state.get("prev_choice"):
-            st.session_state["prev_choice"] = choice
+
+        # 【魔法の発動場所】
+        # 前回選択したものと違うメニューが選ばれたら、サイドバーを閉じる
+        if "prev_choice" in st.session_state and st.session_state["prev_choice"] != choice:
             close_sidebar()
+        
+        # 現在の選択を記録
+        st.session_state["prev_choice"] = choice
 
         if choice == "アルバム一覧":
             df = load_data()
@@ -126,15 +135,12 @@ def main():
                 st.info("データがありません。")
             else:
                 if not st.session_state["is_admin"]:
-                    df = df[df.get("非公開", "") != "True"]
+                    if "非公開" in df.columns:
+                        df = df[df["非公開"] != "True"]
 
-                # ★ インスタ風グリッドの作成 ★
-                # PCは3列、スマホは自動で2列程度に調整されます
                 cols = st.columns(3) 
-                
                 for idx, row in df.iterrows():
-                    with cols[idx % 3]: # 順番に列に振り分け
-                        # カード全体の枠
+                    with cols[idx % 3]:
                         st.markdown(f"""
                             <div class="leopa-card">
                                 <div class="img-container">
@@ -147,7 +153,6 @@ def main():
                             </div>
                         """, unsafe_allow_html=True)
                         
-                        # 詳細確認用のボタン（アコーディオン）
                         with st.expander("詳細を見る"):
                             st.write(f"**性別:** {row.get('性別', '-')}")
                             st.write(f"**誕生日:** {row.get('生年月日', '-')}")
@@ -161,7 +166,6 @@ def main():
                                     st.rerun()
 
         elif choice == "新規登録":
-            # 新規登録のフォーム（前回の内容を維持）
             st.subheader("新しいレオパを登録")
             with st.form("reg_form", clear_on_submit=True):
                 is_p = st.checkbox("非公開にする")
@@ -173,8 +177,8 @@ def main():
                 im1 = st.file_uploader("画像1枚目", type=["jpg", "jpeg", "png"])
                 im2 = st.file_uploader("画像2枚目", type=["jpg", "jpeg", "png"])
                 no = st.text_area("備考")
+                
                 if st.form_submit_button("保存する"):
-                    # 保存処理（前回のロジックと同じ）
                     def convert_image(file):
                         return base64.b64encode(file.read()).decode() if file else ""
                     df_new = load_data()
