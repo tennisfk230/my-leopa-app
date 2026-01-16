@@ -5,44 +5,25 @@ from google.oauth2.service_account import Credentials
 import json
 import base64
 import os
-from streamlit.components.v1 import html
 
-# --- 設定 ---
+# --- 1. 基本設定 ---
 ADMIN_PASSWORD = "lucafk"
 VIEW_PASSWORD = "andgekko"
 SPREADSHEET_NAME = "leopa_database"
 
 st.set_page_config(page_title="&Gekko Album", layout="wide")
 
-# 【決定版】サイドバーを確実に閉じ、右上の誤爆を防ぐ関数
-def close_sidebar_perfect(menu_name):
-    # メニュー名ごとに異なるkeyを持たせることで、毎回実行させます
-    html(f"""
-        <script>
-        const attemptClose = () => {{
-            // 右上のメニューではなく、サイドバー内の「×ボタン」をピンポイントで探す
-            const closeBtn = window.parent.document.querySelector('button[aria-label="Close sidebar"]');
-            if (closeBtn) {{
-                closeBtn.click();
-            }}
-        }};
-        // 0.3秒待ってから実行（スマホの描画ラグを考慮）
-        setTimeout(attemptClose, 300);
-        </script>
-    """, height=0, key=f"close_js_{menu_name}")
-
+# --- 2. デザイン（CSS） ---
 st.markdown("""
     <style>
     .stApp { background-color: #ffffff; }
     [data-testid="stSidebar"] { background-color: #81d1d1 !important; }
-    
     .header-container {
         text-align: center;
         margin: -70px -50px 30px -50px;
         background-color: #000000;
         border-bottom: 4px solid #81d1d1;
     }
-
     .leopa-card {
         border: 1px solid #e0f2f2;
         border-radius: 10px;
@@ -50,7 +31,6 @@ st.markdown("""
         box-shadow: 0 4px 6px rgba(0,0,0,0.05);
         margin-bottom: 20px;
     }
-
     .img-container {
         width: 100%;
         aspect-ratio: 1 / 1;
@@ -62,23 +42,18 @@ st.markdown("""
         height: 100%;
         object-fit: cover;
     }
-
-    .card-text {
-        padding: 10px;
-        text-align: center;
-    }
+    .card-text { padding: 10px; text-align: center; }
     .card-id { font-weight: bold; color: #333; font-size: 0.9rem; }
     .card-morph { color: #81d1d1; font-size: 0.8rem; font-weight: bold; }
-
     .stButton>button {
         background-color: #81d1d1 !important;
         color: white !important;
         border-radius: 20px !important;
-        border: none !important;
     }
     </style>
 """, unsafe_allow_html=True)
 
+# --- 3. 共通関数 ---
 def get_gspread_client():
     scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
     service_account_info = json.loads(st.secrets["GCP_SERVICE_ACCOUNT_JSON"])
@@ -86,9 +61,12 @@ def get_gspread_client():
     return gspread.authorize(creds)
 
 def load_data():
-    client = get_gspread_client()
-    sheet = client.open(SPREADSHEET_NAME).sheet1
-    return pd.DataFrame(sheet.get_all_records())
+    try:
+        client = get_gspread_client()
+        sheet = client.open(SPREADSHEET_NAME).sheet1
+        return pd.DataFrame(sheet.get_all_records())
+    except:
+        return pd.DataFrame()
 
 def save_all_data(df):
     client = get_gspread_client()
@@ -96,7 +74,12 @@ def save_all_data(df):
     sheet.clear()
     sheet.update(range_name='A1', values=[df.columns.values.tolist()] + df.astype(str).values.tolist())
 
+def convert_image(file):
+    return base64.b64encode(file.read()).decode() if file else ""
+
+# --- 4. メイン処理 ---
 def main():
+    # ロゴ表示
     if os.path.exists("logo_gekko.png"):
         st.markdown('<div class="header-container">', unsafe_allow_html=True)
         st.image("logo_gekko.png", use_container_width=True)
@@ -116,13 +99,18 @@ def main():
                 st.rerun()
             else: st.error("パスワードが違います")
     else:
+        # メニュー（日本語）
         menu_options = ["アルバム一覧", "新規登録"] if st.session_state["is_admin"] else ["アルバム一覧"]
-        choice = st.sidebar.radio("メニュー", menu_options)
+        choice = st.sidebar.radio("メニューを選択", menu_options)
 
-        # ★ ここで魔法を発動 ★
+        # 【最新・安全版】サイドバー自動閉鎖の魔法
         if st.session_state["prev_choice"] != choice:
             st.session_state["prev_choice"] = choice
-            close_sidebar_perfect(choice)
+            st.components.v1.html("""
+                <script>
+                window.parent.document.querySelector('button[aria-label="Close sidebar"]').click();
+                </script>
+            """, height=0)
 
         if choice == "アルバム一覧":
             df = load_data()
@@ -147,18 +135,14 @@ def main():
                                 </div>
                             </div>
                         """, unsafe_allow_html=True)
-                        
                         with st.expander("詳細を見る"):
                             st.write(f"**性別:** {row.get('性別', '-')}")
                             st.write(f"**誕生日:** {row.get('生年月日', '-')}")
-                            st.write(f"**クオリティ:** {row.get('クオリティ', '-')}")
                             if row.get("画像2"):
                                 st.image(f"data:image/jpeg;base64,{row['画像2']}", use_container_width=True)
-                            
                             if st.session_state["is_admin"]:
                                 if st.button("削除", key=f"del_{idx}"):
-                                    save_all_data(df.drop(idx))
-                                    st.rerun()
+                                    save_all_data(df.drop(idx)); st.rerun()
 
         elif choice == "新規登録":
             st.subheader("新しいレオパを登録")
@@ -169,13 +153,13 @@ def main():
                 bi = st.date_input("生年月日")
                 ge = st.selectbox("性別", ["不明", "オス", "メス"])
                 qu = st.select_slider("クオリティ", options=["S", "A", "B", "C", ])
-                im1 = st.file_uploader("画像1枚目", type=["jpg", "jpeg", "png"])
-                im2 = st.file_uploader("画像2枚目", type=["jpg", "jpeg", "png"])
-                no = st.text_area("備考")
                 
+                # 画像2枚対応
+                im1 = st.file_uploader("画像1枚目を選択", type=["jpg", "jpeg", "png"])
+                im2 = st.file_uploader("画像2枚目を選択", type=["jpg", "jpeg", "png"])
+                
+                no = st.text_area("備考")
                 if st.form_submit_button("保存する"):
-                    def convert_image(file):
-                        return base64.b64encode(file.read()).decode() if file else ""
                     df_new = load_data()
                     new_data = {
                         "ID":id_v, "モルフ":mo, "生年月日":str(bi), "性別":ge, "クオリティ":qu, 
