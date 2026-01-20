@@ -8,13 +8,13 @@ import os
 from datetime import datetime
 import io
 
-# QRコードと画像処理ライブラリ
+# QRコードライブラリと画像処理ライブラリ
 try:
     import qrcode
-    from PIL import Image, ImageDraw
-    HAS_LIBS = True
+    from PIL import Image, ImageDraw, ImageFont
+    HAS_QR = True
 except ImportError:
-    HAS_LIBS = False
+    HAS_QR = False
 
 # --- 1. 基本設定 ---
 ADMIN_PASSWORD = "lucafk"
@@ -23,19 +23,20 @@ SPREADSHEET_NAME = "leopa_database"
 
 st.set_page_config(page_title="&Gekko System", layout="wide", page_icon="🦎")
 
-# --- 2. デザイン (CSS) ---
+# --- 2. デザイン（CSS） ---
 st.markdown("""
     <style>
     .stApp { background-color: #f8f9fa; }
-    .header-container { text-align: center; margin-bottom: 20px; border-bottom: 3px solid #81d1d1; }
+    .header-container { text-align: center; margin-bottom: 20px; padding-bottom: 10px; border-bottom: 3px solid #81d1d1; }
+    .stTabs [data-baseweb="tab"] { height: 50px; background-color: #ffffff; border-radius: 10px 10px 0 0; }
     .leopa-card { border: 1px solid #eee; border-radius: 12px; background-color: white; box-shadow: 0 4px 6px rgba(0,0,0,0.05); margin-bottom: 20px; overflow: hidden; position: relative; }
     .img-container { width: 100%; aspect-ratio: 1 / 1; overflow: hidden; position: relative; }
     .img-container img { width: 100%; height: 100%; object-fit: cover; }
-    .badge-sex { position: absolute; top: 10px; right: 10px; padding: 5px 10px; border-radius: 20px; color: white; font-weight: bold; font-size: 0.8rem; z-index: 10; }
+    .badge-sex { position: absolute; top: 10px; right: 10px; padding: 5px 10px; border-radius: 20px; font-weight: bold; color: white; font-size: 0.8rem; }
     .male { background-color: #5dade2; }
     .female { background-color: #ec7063; }
     .unknown { background-color: #aeb6bf; }
-    .badge-quality { position: absolute; top: 10px; left: 10px; background-color: rgba(0,0,0,0.6); color: #f1c40f; padding: 2px 8px; border-radius: 5px; font-size: 0.8rem; font-weight: bold; border: 1px solid #f1c40f; z-index: 10; }
+    .badge-quality { position: absolute; top: 10px; left: 10px; background-color: rgba(0,0,0,0.6); color: #f1c40f; padding: 2px 8px; border-radius: 5px; font-size: 0.8rem; font-weight: bold; border: 1px solid #f1c40f; }
     [data-testid="stSidebar"] { display: none; }
     </style>
 """, unsafe_allow_html=True)
@@ -59,28 +60,40 @@ def save_all_data(df):
     client = get_gspread_client()
     sheet = client.open(SPREADSHEET_NAME).sheet1
     sheet.clear()
-    data = [df.columns.values.tolist()] + df.astype(str).values.tolist()
-    sheet.update(data, 'A1')
+    sheet.update(range_name='A1', values=[df.columns.values.tolist()] + df.astype(str).values.tolist())
 
-# 📸 画像をリサイズ・圧縮する関数 (APIエラー対策)
+# ⭐ 改良ポイント：画像をリサイズして保存する関数
 def convert_image(file):
     if file:
-        img = Image.open(file)
-        img = img.convert("RGB")
-        img.thumbnail((800, 800)) # 最大幅800pxに縮小
-        buf = io.BytesIO()
-        img.save(buf, format="JPEG", quality=70) # 圧縮して軽量化
-        return base64.b64encode(buf.getvalue()).decode()
+        try:
+            # 画像を開く
+            img = Image.open(file)
+            # 背景を白にしたRGB形式に変換（透過PNG対策）
+            if img.mode != 'RGB':
+                img = img.convert('RGB')
+            
+            # 最大サイズを800pxにリサイズ（アスペクト比維持）
+            img.thumbnail((800, 800))
+            
+            # バッファにJPEG形式で保存（画質を70%に落として軽量化）
+            buf = io.BytesIO()
+            img.save(buf, format="JPEG", quality=70)
+            
+            # Base64エンコードして返す
+            return base64.b64encode(buf.getvalue()).decode()
+        except Exception as e:
+            st.error(f"画像処理でエラーが発生しました: {e}")
+            return ""
     return ""
 
-# 🖨️ ラベル画像生成関数
 def create_label_image(id_val, morph, birth, quality):
-    if not HAS_LIBS: return None
+    if not HAS_QR: return None
     width, height = 400, 200
     img = Image.new('RGB', (width, height), color='white')
     draw = ImageDraw.Draw(img)
+    qr_data = f"ID:{id_val}\nMorph:{morph}\nBirth:{birth}"
     qr = qrcode.QRCode(box_size=4, border=2)
-    qr.add_data(f"ID:{id_val}\nMorph:{morph}")
+    qr.add_data(qr_data)
     qr.make(fit=True)
     qr_img = qr.make_image(fill_color="black", back_color="white")
     img.paste(qr_img, (260, 20))
@@ -114,93 +127,98 @@ def main():
             else: st.error("パスワードが違います")
     else:
         df = load_data()
-        # 4つのタブを実装
+        if not df.empty and not st.session_state["is_admin"]:
+            if "非公開" in df.columns:
+                df = df[df["非公開"] != "True"]
+
         tabs = st.tabs(["📊 ダッシュボード", "🦎 アルバム・検索", "➕ 新規登録", "🖨️ ラベル生成"])
 
-        # --- TAB 1: ダッシュボード ---
-        with tabs[0]:
-            if not df.empty:
-                c1, c2, c3 = st.columns(3)
-                c1.metric("総飼育数", f"{len(df)}匹")
-                c2.metric("♂ オス", f"{len(df[df['性別']=='オス'])}匹")
-                c3.metric("♀ メス", f"{len(df[df['性別']=='メス'])}匹")
-                st.bar_chart(df['モルフ'].value_counts())
-
-        # --- TAB 2: アルバム ---
-        with tabs[1]:
+        with tabs[0]: # ダッシュボード
+            st.markdown("### 📈 Breeding Dashboard")
             if df.empty: st.info("データがありません")
             else:
-                search = st.text_input("キーワード検索 (IDやモルフ名)")
-                v_df = df[df.apply(lambda r: search.lower() in str(r).lower(), axis=1)] if search else df
-                cols = st.columns(2)
-                for i, (idx, row) in enumerate(v_df.iterrows()):
-                    with cols[i % 2]:
-                        s_cls = "male" if row['性別']=="オス" else "female" if row['性別']=="メス" else "unknown"
-                        st.markdown(f"""
-                            <div class="leopa-card">
-                                <div class="img-container">
-                                    <span class="badge-quality">{row['クオリティ']}</span>
-                                    <span class="badge-sex {s_cls}">{row['性別']}</span>
-                                    <img src="data:image/jpeg;base64,{row['画像1']}">
-                                </div>
-                                <div style="padding:10px;"><b>ID: {row['ID']}</b><br>{row['モルフ']}</div>
-                            </div>
-                        """, unsafe_allow_html=True)
-                        with st.expander("詳細を見る"):
-                            st.write(f"生年月日: {row['生年月日']}")
-                            st.write(f"親情報: {row.get('父親ID','-')} × {row.get('母親ID','-')}")
-                            st.write(f"備考: {row['備考']}")
-                            if st.session_state["is_admin"] and st.button("削除", key=f"del_{idx}"):
-                                save_all_data(df.drop(idx)); st.rerun()
+                c1, c2, c3 = st.columns(3)
+                c1.metric("総飼育数", f"{len(df)}匹")
+                c2.metric("♂ オス", f"{len(df[df['性別'] == 'オス'])}匹")
+                c3.metric("♀ メス", f"{len(df[df['性別'] == 'メス'])}匹")
+                st.bar_chart(df['モルフ'].value_counts())
 
-        # --- TAB 3: 新規登録 ---
-        with tabs[2]:
-            st.subheader("新しい個体を登録")
+        with tabs[1]: # アルバム
+            with st.expander("🔍 検索・絞り込み"):
+                col_f1, col_f2 = st.columns(2)
+                with col_f1:
+                    filter_sex = st.multiselect("性別", options=["オス", "メス", "不明"])
+                    filter_quality = st.multiselect("クオリティ", options=["S", "A", "B", "C"])
+                with col_f2:
+                    search_text = st.text_input("キーワード検索 (ID, モルフ名など)")
+            
+            view_df = df.copy()
+            if not view_df.empty:
+                if filter_sex: view_df = view_df[view_df['性別'].isin(filter_sex)]
+                if filter_quality: view_df = view_df[view_df['クオリティ'].isin(filter_quality)]
+                if search_text:
+                    view_df = view_df[view_df['ID'].astype(str).str.contains(search_text, case=False) | view_df['モルフ'].astype(str).str.contains(search_text, case=False)]
+
+            cols = st.columns(2)
+            for i, (idx, row) in enumerate(view_df.iterrows()):
+                sex_class = "male" if row['性別'] == "オス" else "female" if row['性別'] == "メス" else "unknown"
+                sex_icon = "♂" if row['性別'] == "オス" else "♀" if row['性別'] == "メス" else "?"
+                with cols[i % 2]:
+                    st.markdown(f'<div class="leopa-card"><div class="img-container"><span class="badge-quality">{row.get("クオリティ","-")}</span><span class="badge-sex {sex_class}">{sex_icon}</span><img src="data:image/jpeg;base64,{row.get("画像1","")}"></div><div style="padding:10px;"><b>ID: {row.get("ID","-")}</b><br><small>{row.get("モルフ","-")}</small></div></div>', unsafe_allow_html=True)
+                    with st.expander("詳細"):
+                        st.write(f"誕生日: {row.get('生年月日','-')}")
+                        st.write(f"親: {row.get('父親ID','-')} × {row.get('母親ID','-')}")
+                        if row.get("画像2"): st.image(f"data:image/jpeg;base64,{row['画像2']}", use_container_width=True)
+                        if st.session_state["is_admin"] and st.button("削除", key=f"del_{idx}"):
+                            save_all_data(df.drop(idx)); st.rerun()
+
+        with tabs[2]: # 新規登録
+            st.markdown("### 📝 新規個体登録")
             this_year = datetime.now().year
-            sel_year = st.selectbox("誕生年", [str(y) for y in range(this_year, this_year-15, -1)])
-            prefix = sel_year[2:]
-            count = len(df[df['ID'].astype(str).str.startswith(prefix)]) if not df.empty else 0
+            selected_year = st.selectbox("誕生年", [str(y) for y in range(this_year, this_year - 15, -1)])
+            year_prefix = selected_year[2:]
+            count = len(df[df["ID"].astype(str).str.startswith(year_prefix)]) if not df.empty else 0
             
             with st.form("reg_form", clear_on_submit=True):
+                is_p = st.checkbox("非公開にする")
                 col1, col2 = st.columns(2)
                 with col1:
-                    id_v = st.text_input("個体ID", value=f"{prefix}{count+1:03d}")
-                    bi_str = st.text_input("生年月日", value=f"{sel_year}/")
+                    id_v = st.text_input("個体ID", value=f"{year_prefix}{count+1:03d}")
+                    bi_str = st.text_input("生年月日 (例: 2026/05/10, 2026/不明)", value=f"{selected_year}/")
                 with col2:
                     mo = st.text_input("モルフ")
                     ge = st.selectbox("性別", ["不明", "オス", "メス"])
                 qu = st.select_slider("クオリティ", options=["S", "A", "B", "C"])
-                
-                st.write("---")
-                f_id = st.text_input("父親ID")
-                m_id = st.text_input("母親ID")
-                im1 = st.file_uploader("画像1 (必須)", type=["jpg", "jpeg", "png"])
-                im2 = st.file_uploader("画像2 (詳細用)", type=["jpg", "jpeg", "png"])
+                st.markdown("---")
+                col_k1, col_k2 = st.columns(2)
+                with col_k1:
+                    f_id = st.text_input("父親ID"); f_mo = st.text_input("父親モルフ")
+                with col_k2:
+                    m_id = st.text_input("母親ID"); m_mo = st.text_input("母親モルフ")
+                st.markdown("---")
+                im1 = st.file_uploader("画像1枚目", type=["jpg", "jpeg", "png"])
+                im2 = st.file_uploader("画像2枚目", type=["jpg", "jpeg", "png"])
                 no = st.text_area("備考")
-                
-                if st.form_submit_button("保存"):
-                    if not im1: st.error("画像をアップロードしてください")
-                    else:
-                        new = {
-                            "ID":id_v, "モルフ":mo, "生年月日":bi_str, "性別":ge, "クオリティ":qu,
-                            "父親ID":f_id, "母親ID":m_id, "画像1":convert_image(im1), "画像2":convert_image(im2),
-                            "備考":no, "非公開": "False"
-                        }
-                        save_all_data(pd.concat([df, pd.DataFrame([new])], ignore_index=True))
-                        st.success("保存しました！"); st.rerun()
+                if st.form_submit_button("登録する"):
+                    new_data = {
+                        "ID":id_v, "モルフ":mo, "生年月日":bi_str, "性別":ge, "クオリティ":qu,
+                        "父親ID":f_id, "父親モルフ":f_mo, "母親ID":m_id, "母親モルフ":m_mo,
+                        "画像1":convert_image(im1), "画像2":convert_image(im2), "備考":no, "非公開": str(is_p)
+                    }
+                    save_all_data(pd.concat([df, pd.DataFrame([new_data])], ignore_index=True))
+                    st.success(f"ID {id_v} を保存しました！"); st.rerun()
 
-        # --- TAB 4: ラベル生成 ---
-        with tabs[3]:
-            st.subheader("🖨️ ラベル作成")
+        with tabs[3]: # ラベル生成
+            st.markdown("### 🖨️ ラベル作成")
             if df.empty: st.warning("データがありません")
             else:
-                target = st.selectbox("個体を選択", df['ID'].astype(str) + " : " + df['モルフ'])
-                if st.button("ラベル生成"):
-                    tid = target.split(" : ")[0]
-                    r = df[df['ID'].astype(str) == tid].iloc[0]
-                    label = create_label_image(r['ID'], r['モルフ'], r['生年月日'], r['クオリティ'])
+                label_target = st.selectbox("個体を選択", df['ID'].astype(str) + " : " + df['モルフ'])
+                if st.button("生成"):
+                    tid = label_target.split(" : ")[0]
+                    row = df[df['ID'].astype(str) == tid].iloc[0]
+                    label = create_label_image(row['ID'], row['モルフ'], row['生年月日'], row['クオリティ'])
                     st.image(label, width=400)
-                    st.download_button("画像をダウンロード", label, f"label_{tid}.png", "image/png")
+                    st.download_button("ダウンロード", label, f"label_{tid}.png", "image/png")
 
 if __name__ == "__main__":
     main()
