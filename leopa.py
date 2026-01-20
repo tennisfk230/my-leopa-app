@@ -156,7 +156,7 @@ def main():
                 c3.metric("♀", f"{len(df[df['性別'] == 'メス'])}匹")
                 st.bar_chart(df['モルフ'].value_counts())
 
-        with tabs[1]: # アルバム
+with tabs[1]: # アルバム & 検索
             with st.expander("🔍 検索・絞り込み"):
                 col_f1, col_f2 = st.columns(2)
                 with col_f1:
@@ -178,17 +178,54 @@ def main():
                 s_icon = "♂" if row['性別'] == "オス" else "♀" if row['性別'] == "メス" else "?"
                 with cols[i % 2]:
                     st.markdown(f'<div class="leopa-card"><div class="img-container"><span class="badge-quality">{row.get("クオリティ","-")}</span><span class="badge-sex {s_cls}">{s_icon}</span><img src="data:image/jpeg;base64,{row.get("画像1","")}"></div><div style="padding:10px;"><b>ID: {row.get("ID","-")}</b><br>{row.get("モルフ","-")}</div></div>', unsafe_allow_html=True)
-                    with st.expander("詳細 & 血統"):
-                        t1, t2 = st.tabs(["基本情報", "🧬 血統"])
-                        with t1:
-                            st.write(f"誕生日: {row.get('生年月日','-')}")
-                            st.write(f"備考: {row.get('備考','-')}")
-                            if row.get("画像2"): st.image(f"data:image/jpeg;base64,{row['画像2']}", use_container_width=True)
-                        with t2:
-                            st.write(f"父親: {row.get('父親ID','-')} ({row.get('父親モルフ','-')})")
-                            st.write(f"母親: {row.get('母親ID','-')} ({row.get('母親モルフ','-')})")
-                        if st.session_state["is_admin"] and st.button("削除", key=f"del_{idx}"):
-                            save_all_data(df.drop(idx)); st.rerun()
+                    
+                    with st.expander("詳細 / 編集"):
+                        mode = st.radio("操作を選択", ["表示", "編集"], key=f"mode_{idx}", horizontal=True)
+                        
+                        if mode == "表示":
+                            t1, t2 = st.tabs(["基本情報", "🧬 血統"])
+                            with t1:
+                                st.write(f"誕生日: {row.get('生年月日','-')}")
+                                st.write(f"備考: {row.get('備考','-')}")
+                                if row.get("画像2"): st.image(f"data:image/jpeg;base64,{row['画像2']}", use_container_width=True)
+                            with t2:
+                                st.write(f"父親: {row.get('父親ID','-')} ({row.get('父親モルフ','-')})")
+                                st.write(f"母親: {row.get('母親ID','-')} ({row.get('母親モルフ','-')})")
+                            
+                            if st.session_state["is_admin"]:
+                                if st.button("🗑️ この個体を削除", key=f"del_{idx}"):
+                                    save_all_data(df.drop(idx))
+                                    st.rerun()
+                        
+                        else: # 編集モード
+                            if not st.session_state["is_admin"]:
+                                st.warning("編集は管理者のみ可能です")
+                            else:
+                                with st.form(f"edit_form_{idx}"):
+                                    new_mo = st.text_input("モルフ", value=row['モルフ'])
+                                    new_ge = st.selectbox("性別", ["不明", "オス", "メス"], index=["不明", "オス", "メス"].index(row['性別']))
+                                    new_qu = st.select_slider("クオリティ", options=["S", "A", "B", "C"], value=row['クオリティ'])
+                                    new_bi = st.text_input("生年月日", value=row['生年月日'])
+                                    new_f_id = st.text_input("父親ID", value=row.get('父親ID',''))
+                                    new_m_id = st.text_input("母親ID", value=row.get('母親ID',''))
+                                    new_no = st.text_area("備考", value=row.get('備考',''))
+                                    
+                                    new_im1 = st.file_uploader("画像を差し替える (メイン)", type=["jpg", "jpeg", "png"], key=f"edit_im1_{idx}")
+                                    
+                                    if st.form_submit_button("更新を保存する"):
+                                        df.at[idx, 'モルフ'] = new_mo
+                                        df.at[idx, '性別'] = new_ge
+                                        df.at[idx, 'クオリティ'] = new_qu
+                                        df.at[idx, '生年月日'] = new_bi
+                                        df.at[idx, '父親ID'] = new_f_id
+                                        df.at[idx, '母親ID'] = new_m_id
+                                        df.at[idx, '備考'] = new_no
+                                        if new_im1:
+                                            df.at[idx, '画像1'] = convert_image(new_im1)
+                                        
+                                        save_all_data(df)
+                                        st.success("情報を更新しました！")
+                                        st.rerun()
 
         with tabs[2]: # 新規登録 (以前の使いやすいUIを再現)
             st.markdown("### 📝 新規個体登録")
@@ -243,5 +280,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
