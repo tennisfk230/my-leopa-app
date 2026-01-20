@@ -8,7 +8,7 @@ import os
 from datetime import datetime
 import io
 
-# QRコードライブラリと画像処理ライブラリ
+# QRコードライブラリのインポート
 try:
     import qrcode
     from PIL import Image, ImageDraw, ImageFont
@@ -23,7 +23,7 @@ SPREADSHEET_NAME = "leopa_database"
 
 st.set_page_config(page_title="&Gekko System", layout="wide", page_icon="🦎")
 
-# --- 2. デザイン（CSS） ---
+# --- 2. プロ仕様デザイン（CSS） ---
 st.markdown("""
     <style>
     .stApp { background-color: #f8f9fa; }
@@ -60,30 +60,21 @@ def save_all_data(df):
     client = get_gspread_client()
     sheet = client.open(SPREADSHEET_NAME).sheet1
     sheet.clear()
-    sheet.update(range_name='A1', values=[df.columns.values.tolist()] + df.astype(str).values.tolist())
+    # 🌟 エラーの出にくい最新の書き方に固定
+    data = [df.columns.values.tolist()] + df.astype(str).values.tolist()
+    sheet.update(data, 'A1')
 
-# ⭐ 改良ポイント：画像をリサイズして保存する関数
+# 📸 画像をリサイズ・圧縮してエラーを防ぐ関数
 def convert_image(file):
     if file:
         try:
-            # 画像を開く
             img = Image.open(file)
-            # 背景を白にしたRGB形式に変換（透過PNG対策）
-            if img.mode != 'RGB':
-                img = img.convert('RGB')
-            
-            # 最大サイズを800pxにリサイズ（アスペクト比維持）
-            img.thumbnail((800, 800))
-            
-            # バッファにJPEG形式で保存（画質を70%に落として軽量化）
+            if img.mode != 'RGB': img = img.convert('RGB')
+            img.thumbnail((800, 800)) # 最大800pxにリサイズ
             buf = io.BytesIO()
-            img.save(buf, format="JPEG", quality=70)
-            
-            # Base64エンコードして返す
+            img.save(buf, format="JPEG", quality=70) # 圧縮
             return base64.b64encode(buf.getvalue()).decode()
-        except Exception as e:
-            st.error(f"画像処理でエラーが発生しました: {e}")
-            return ""
+        except: return ""
     return ""
 
 def create_label_image(id_val, morph, birth, quality):
@@ -102,6 +93,7 @@ def create_label_image(id_val, morph, birth, quality):
     draw.text((30, 70), f"{morph}", fill="black")
     draw.text((30, 110), f"Birth: {birth}", fill="gray")
     draw.text((30, 150), f"Rank: {quality}", fill="#f1c40f")
+    draw.text((340, 160), "&Gekko", fill="#81d1d1")
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     return buf.getvalue()
@@ -134,13 +126,12 @@ def main():
         tabs = st.tabs(["📊 ダッシュボード", "🦎 アルバム・検索", "➕ 新規登録", "🖨️ ラベル生成"])
 
         with tabs[0]: # ダッシュボード
-            st.markdown("### 📈 Breeding Dashboard")
             if df.empty: st.info("データがありません")
             else:
                 c1, c2, c3 = st.columns(3)
-                c1.metric("総飼育数", f"{len(df)}匹")
-                c2.metric("♂ オス", f"{len(df[df['性別'] == 'オス'])}匹")
-                c3.metric("♀ メス", f"{len(df[df['性別'] == 'メス'])}匹")
+                c1.metric("総数", f"{len(df)}匹")
+                c2.metric("♂", f"{len(df[df['性別'] == 'オス'])}匹")
+                c3.metric("♀", f"{len(df[df['性別'] == 'メス'])}匹")
                 st.bar_chart(df['モルフ'].value_counts())
 
         with tabs[1]: # アルバム
@@ -150,7 +141,7 @@ def main():
                     filter_sex = st.multiselect("性別", options=["オス", "メス", "不明"])
                     filter_quality = st.multiselect("クオリティ", options=["S", "A", "B", "C"])
                 with col_f2:
-                    search_text = st.text_input("キーワード検索 (ID, モルフ名など)")
+                    search_text = st.text_input("キーワード検索 (ID, モルフなど)")
             
             view_df = df.copy()
             if not view_df.empty:
@@ -161,21 +152,26 @@ def main():
 
             cols = st.columns(2)
             for i, (idx, row) in enumerate(view_df.iterrows()):
-                sex_class = "male" if row['性別'] == "オス" else "female" if row['性別'] == "メス" else "unknown"
-                sex_icon = "♂" if row['性別'] == "オス" else "♀" if row['性別'] == "メス" else "?"
+                s_cls = "male" if row['性別'] == "オス" else "female" if row['性別'] == "メス" else "unknown"
+                s_icon = "♂" if row['性別'] == "オス" else "♀" if row['性別'] == "メス" else "?"
                 with cols[i % 2]:
-                    st.markdown(f'<div class="leopa-card"><div class="img-container"><span class="badge-quality">{row.get("クオリティ","-")}</span><span class="badge-sex {sex_class}">{sex_icon}</span><img src="data:image/jpeg;base64,{row.get("画像1","")}"></div><div style="padding:10px;"><b>ID: {row.get("ID","-")}</b><br><small>{row.get("モルフ","-")}</small></div></div>', unsafe_allow_html=True)
-                    with st.expander("詳細"):
-                        st.write(f"誕生日: {row.get('生年月日','-')}")
-                        st.write(f"親: {row.get('父親ID','-')} × {row.get('母親ID','-')}")
-                        if row.get("画像2"): st.image(f"data:image/jpeg;base64,{row['画像2']}", use_container_width=True)
+                    st.markdown(f'<div class="leopa-card"><div class="img-container"><span class="badge-quality">{row.get("クオリティ","-")}</span><span class="badge-sex {s_cls}">{s_icon}</span><img src="data:image/jpeg;base64,{row.get("画像1","")}"></div><div style="padding:10px;"><b>ID: {row.get("ID","-")}</b><br>{row.get("モルフ","-")}</div></div>', unsafe_allow_html=True)
+                    with st.expander("詳細 & 血統"):
+                        t1, t2 = st.tabs(["基本情報", "🧬 血統"])
+                        with t1:
+                            st.write(f"誕生日: {row.get('生年月日','-')}")
+                            st.write(f"備考: {row.get('備考','-')}")
+                            if row.get("画像2"): st.image(f"data:image/jpeg;base64,{row['画像2']}", use_container_width=True)
+                        with t2:
+                            st.write(f"父親: {row.get('父親ID','-')} ({row.get('父親モルフ','-')})")
+                            st.write(f"母親: {row.get('母親ID','-')} ({row.get('母親モルフ','-')})")
                         if st.session_state["is_admin"] and st.button("削除", key=f"del_{idx}"):
                             save_all_data(df.drop(idx)); st.rerun()
 
-        with tabs[2]: # 新規登録
+        with tabs[2]: # 新規登録 (以前の使いやすいUIを再現)
             st.markdown("### 📝 新規個体登録")
             this_year = datetime.now().year
-            selected_year = st.selectbox("誕生年", [str(y) for y in range(this_year, this_year - 15, -1)])
+            selected_year = st.selectbox("誕生年を選択", [str(y) for y in range(this_year, this_year - 15, -1)])
             year_prefix = selected_year[2:]
             count = len(df[df["ID"].astype(str).str.startswith(year_prefix)]) if not df.empty else 0
             
@@ -189,16 +185,19 @@ def main():
                     mo = st.text_input("モルフ")
                     ge = st.selectbox("性別", ["不明", "オス", "メス"])
                 qu = st.select_slider("クオリティ", options=["S", "A", "B", "C"])
+                
                 st.markdown("---")
+                st.caption("🧬 血統情報")
                 col_k1, col_k2 = st.columns(2)
                 with col_k1:
                     f_id = st.text_input("父親ID"); f_mo = st.text_input("父親モルフ")
                 with col_k2:
                     m_id = st.text_input("母親ID"); m_mo = st.text_input("母親モルフ")
-                st.markdown("---")
-                im1 = st.file_uploader("画像1枚目", type=["jpg", "jpeg", "png"])
-                im2 = st.file_uploader("画像2枚目", type=["jpg", "jpeg", "png"])
+                
+                im1 = st.file_uploader("画像1 (メイン)", type=["jpg", "jpeg", "png"])
+                im2 = st.file_uploader("画像2 (詳細)", type=["jpg", "jpeg", "png"])
                 no = st.text_area("備考")
+                
                 if st.form_submit_button("登録する"):
                     new_data = {
                         "ID":id_v, "モルフ":mo, "生年月日":bi_str, "性別":ge, "クオリティ":qu,
@@ -213,12 +212,12 @@ def main():
             if df.empty: st.warning("データがありません")
             else:
                 label_target = st.selectbox("個体を選択", df['ID'].astype(str) + " : " + df['モルフ'])
-                if st.button("生成"):
+                if st.button("ラベルを生成する"):
                     tid = label_target.split(" : ")[0]
                     row = df[df['ID'].astype(str) == tid].iloc[0]
                     label = create_label_image(row['ID'], row['モルフ'], row['生年月日'], row['クオリティ'])
                     st.image(label, width=400)
-                    st.download_button("ダウンロード", label, f"label_{tid}.png", "image/png")
+                    st.download_button("画像をダウンロード", label, f"label_{tid}.png", "image/png")
 
 if __name__ == "__main__":
     main()
