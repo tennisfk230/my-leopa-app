@@ -69,22 +69,29 @@ def convert_image(file):
     if file:
         try:
             img = Image.open(file)
-            if img.mode != 'RGB': img = img.convert('RGB')
+            # 1. 向きの自動回転（スマホ写真対策）
+            if hasattr(img, '_getexif'):
+                from PIL import ImageOps
+                img = ImageOps.exif_transpose(img)
             
-            # 📸 サイズをさらに小さく (500px) して、データ量を極限まで減らす
-            img.thumbnail((500, 500)) 
+            # 2. RGB形式に変換
+            if img.mode != 'RGB':
+                img = img.convert('RGB')
             
+            # 3. サイズを 400px まで大幅にリサイズ（これなら確実に収まります）
+            img.thumbnail((400, 400)) 
+            
+            # 4. 画質を 40% まで落として極限まで軽量化
             buf = io.BytesIO()
-            # 📉 画質を50%に設定（これで劇的に軽くなります）
-            img.save(buf, format="JPEG", quality=50, optimize=True)
+            img.save(buf, format="JPEG", quality=40, optimize=True)
             
             base64_str = base64.b64encode(buf.getvalue()).decode()
             
-            # 🛡️ 念のための安全装置：まだ重い場合はさらに小さくする
-            if len(base64_str) > 45000:
-                img.thumbnail((300, 300))
+            # 🌟 5. 最終チェック：もしこれでも4万文字を超えていたらさらに半分に
+            if len(base64_str) > 40000:
+                img.thumbnail((200, 200))
                 buf = io.BytesIO()
-                img.save(buf, format="JPEG", quality=40)
+                img.save(buf, format="JPEG", quality=30)
                 base64_str = base64.b64encode(buf.getvalue()).decode()
                 
             return base64_str
@@ -236,4 +243,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
