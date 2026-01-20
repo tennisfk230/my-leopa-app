@@ -70,11 +70,26 @@ def convert_image(file):
         try:
             img = Image.open(file)
             if img.mode != 'RGB': img = img.convert('RGB')
-            img.thumbnail((800, 800)) # 最大800pxにリサイズ
+            
+            # 📸 サイズをさらに小さく (500px) して、データ量を極限まで減らす
+            img.thumbnail((500, 500)) 
+            
             buf = io.BytesIO()
-            img.save(buf, format="JPEG", quality=70) # 圧縮
-            return base64.b64encode(buf.getvalue()).decode()
-        except: return ""
+            # 📉 画質を50%に設定（これで劇的に軽くなります）
+            img.save(buf, format="JPEG", quality=50, optimize=True)
+            
+            base64_str = base64.b64encode(buf.getvalue()).decode()
+            
+            # 🛡️ 念のための安全装置：まだ重い場合はさらに小さくする
+            if len(base64_str) > 45000:
+                img.thumbnail((300, 300))
+                buf = io.BytesIO()
+                img.save(buf, format="JPEG", quality=40)
+                base64_str = base64.b64encode(buf.getvalue()).decode()
+                
+            return base64_str
+        except:
+            return ""
     return ""
 
 def create_label_image(id_val, morph, birth, quality):
@@ -221,3 +236,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
