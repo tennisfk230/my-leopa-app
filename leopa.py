@@ -68,13 +68,10 @@ def convert_image(file):
             img = Image.open(file)
             if hasattr(img, '_getexif'): img = ImageOps.exif_transpose(img)
             if img.mode != 'RGB': img = img.convert('RGB')
-            # 📸 強力なリサイズ（400px）
             img.thumbnail((400, 400))
             buf = io.BytesIO()
-            # 📉 低画質圧縮（40%）
             img.save(buf, format="JPEG", quality=40, optimize=True)
             b_str = base64.b64encode(buf.getvalue()).decode()
-            # 🛡️ 5万文字制限への最終ガード
             if len(b_str) > 40000:
                 img.thumbnail((200, 200))
                 buf = io.BytesIO()
@@ -155,6 +152,7 @@ def main():
                 if search_text:
                     view_df = view_df[view_df['ID'].astype(str).str.contains(search_text, case=False) | view_df['モルフ'].astype(str).str.contains(search_text, case=False)]
 
+            # 📸 左右2列にタイル表示
             cols = st.columns(2)
             for i, (idx, row) in enumerate(view_df.iterrows()):
                 s_cls = "male" if row['性別'] == "オス" else "female" if row['性別'] == "メス" else "unknown"
@@ -163,7 +161,6 @@ def main():
                     st.markdown(f'<div class="leopa-card"><div class="img-container"><span class="badge-quality">{row.get("クオリティ","-")}</span><span class="badge-sex {s_cls}">{s_icon}</span><img src="data:image/jpeg;base64,{row.get("画像1","")}"></div><div style="padding:10px;"><b>ID: {row.get("ID","-")}</b><br>{row.get("モルフ","-")}</div></div>', unsafe_allow_html=True)
                     
                     with st.expander("詳細 / 編集"):
-                        # 管理者なら「表示」か「編集」を選べるボタンを設置
                         if st.session_state["is_admin"]:
                             mode = st.radio("操作を選択", ["表示", "編集"], key=f"mode_{idx}", horizontal=True)
                         else: mode = "表示"
@@ -180,7 +177,7 @@ def main():
                             if st.session_state["is_admin"]:
                                 if st.button("🗑️ 削除", key=f"del_{idx}"):
                                     save_all_data(df.drop(idx)); st.rerun()
-                        else: # 🛠️ 編集モード（その場ですぐ修正可能）
+                        else:
                             with st.form(f"edit_{idx}"):
                                 n_mo = st.text_input("モルフ", value=row['モルフ'])
                                 n_ge = st.selectbox("性別", ["不明", "オス", "メス"], index=["不明", "オス", "メス"].index(row['性別']))
@@ -191,7 +188,10 @@ def main():
                                 n_mi = st.text_input("母親ID", value=row.get('母親ID',''))
                                 n_mm = st.text_input("母親モルフ", value=row.get('母親モルフ',''))
                                 n_no = st.text_area("備考", value=row.get('備考',''))
-                                n_im1 = st.file_uploader("画像を差し替える", type=["jpg", "jpeg", "png"], key=f"up_{idx}")
+                                # 🖼️ 画像1と画像2、両方の差し替えに対応
+                                n_im1 = st.file_uploader("画像1を差し替える", type=["jpg", "jpeg", "png"], key=f"up1_{idx}")
+                                n_im2 = st.file_uploader("画像2を差し替える", type=["jpg", "jpeg", "png"], key=f"up2_{idx}")
+                                
                                 if st.form_submit_button("更新を保存する"):
                                     df.at[idx, 'モルフ'] = n_mo
                                     df.at[idx, '性別'] = n_ge
@@ -203,19 +203,24 @@ def main():
                                     df.at[idx, '母親モルフ'] = n_mm
                                     df.at[idx, '備考'] = n_no
                                     if n_im1: df.at[idx, '画像1'] = convert_image(n_im1)
-                                    save_all_data(df); st.success("情報を更新しました！"); st.rerun()
+                                    if n_im2: df.at[idx, '画像2'] = convert_image(n_im2)
+                                    save_all_data(df); st.success("更新完了！"); st.rerun()
 
         with tabs[2]: # ➕ 新規登録
             st.markdown("### 📝 新規個体登録")
             this_year = datetime.now().year
             sel_y = st.selectbox("誕生年を選択", [str(y) for y in range(this_year, this_year - 15, -1)])
             prefix = sel_y[2:]
-            count = len(df[df["ID"].astype(str).str.startswith(prefix)]) if not df.empty else 0
+            if not df.empty:
+                count = len(df[df["ID"].astype(str).str.startswith(prefix)])
+            else: count = 0
+            default_id = f"{prefix}{count+1:03d}"
+            
             with st.form("reg_form", clear_on_submit=True):
                 is_p = st.checkbox("非公開にする")
                 col1, col2 = st.columns(2)
                 with col1:
-                    id_v = st.text_input("個体ID", value=f"{prefix}{count+1:03d}")
+                    id_v = st.text_input("個体ID", value=default_id)
                     bi_s = st.text_input("生年月日 (例: 2026/05/10)", value=f"{sel_y}/")
                 with col2:
                     mo = st.text_input("モルフ")
@@ -251,7 +256,7 @@ def main():
                     row = df[df['ID'].astype(str) == tid].iloc[0]
                     label = create_label_image(row['ID'], row['モルフ'], row['生年月日'], row['クオリティ'])
                     st.image(label, width=400)
-                    st.download_button("画像をダウンロード", label, f"label_{tid}.png", "image/png")
+                    st.download_button("ダウンロード", label, f"label_{tid}.png", "image/png")
 
 if __name__ == "__main__":
     main()
