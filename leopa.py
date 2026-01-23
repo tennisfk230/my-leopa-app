@@ -62,21 +62,27 @@ def save_all_data(df):
     data = [df.columns.values.tolist()] + df.astype(str).values.tolist()
     sheet.update(range_name='A1', values=data)
 
+# ✅ ここに二段階の圧縮機能を追加しました
 def convert_image(file):
     if file:
         try:
             img = Image.open(file)
             if hasattr(img, '_getexif'): img = ImageOps.exif_transpose(img)
             if img.mode != 'RGB': img = img.convert('RGB')
+            
+            # 1段目：400px, 画質40
             img.thumbnail((400, 400))
             buf = io.BytesIO()
             img.save(buf, format="JPEG", quality=40, optimize=True)
             b_str = base64.b64encode(buf.getvalue()).decode()
+            
+            # 2段目：40,000文字を超えた場合、200px, 画質30まで落とす
             if len(b_str) > 40000:
                 img.thumbnail((200, 200))
                 buf = io.BytesIO()
                 img.save(buf, format="JPEG", quality=30)
                 b_str = base64.b64encode(buf.getvalue()).decode()
+            
             return b_str
         except: return ""
     return ""
@@ -152,7 +158,6 @@ def main():
                 if search_text:
                     view_df = view_df[view_df['ID'].astype(str).str.contains(search_text, case=False) | view_df['モルフ'].astype(str).str.contains(search_text, case=False)]
 
-            # 📸 左右2列にタイル表示
             cols = st.columns(2)
             for i, (idx, row) in enumerate(view_df.iterrows()):
                 s_cls = "male" if row['性別'] == "オス" else "female" if row['性別'] == "メス" else "unknown"
@@ -162,7 +167,7 @@ def main():
                     
                     with st.expander("詳細 / 編集"):
                         if st.session_state["is_admin"]:
-                            mode = st.radio("操作を選択", ["表示", "編集"], key=f"mode_{idx}", horizontal=True)
+                            mode = st.radio("操作を選択", ["表示", "編集"], key=f"m_{idx}", horizontal=True)
                         else: mode = "表示"
                         
                         if mode == "表示":
@@ -179,6 +184,7 @@ def main():
                                     save_all_data(df.drop(idx)); st.rerun()
                         else:
                             with st.form(f"edit_{idx}"):
+                                n_id = st.text_input("個体ID", value=row['ID'])
                                 n_mo = st.text_input("モルフ", value=row['モルフ'])
                                 n_ge = st.selectbox("性別", ["不明", "オス", "メス"], index=["不明", "オス", "メス"].index(row['性別']))
                                 n_qu = st.select_slider("クオリティ", options=["S", "A", "B", "C"], value=row['クオリティ'])
@@ -188,11 +194,10 @@ def main():
                                 n_mi = st.text_input("母親ID", value=row.get('母親ID',''))
                                 n_mm = st.text_input("母親モルフ", value=row.get('母親モルフ',''))
                                 n_no = st.text_area("備考", value=row.get('備考',''))
-                                # 🖼️ 画像1と画像2、両方の差し替えに対応
-                                n_im1 = st.file_uploader("画像1を差し替える", type=["jpg", "jpeg", "png"], key=f"up1_{idx}")
-                                n_im2 = st.file_uploader("画像2を差し替える", type=["jpg", "jpeg", "png"], key=f"up2_{idx}")
-                                
-                                if st.form_submit_button("更新を保存する"):
+                                n_im1 = st.file_uploader("画像1差替", type=["jpg", "jpeg", "png"], key=f"u1_{idx}")
+                                n_im2 = st.file_uploader("画像2追加/差替", type=["jpg", "jpeg", "png"], key=f"u2_{idx}")
+                                if st.form_submit_button("更新を保存"):
+                                    df.at[idx, 'ID'] = n_id
                                     df.at[idx, 'モルフ'] = n_mo
                                     df.at[idx, '性別'] = n_ge
                                     df.at[idx, 'クオリティ'] = n_qu
@@ -204,16 +209,15 @@ def main():
                                     df.at[idx, '備考'] = n_no
                                     if n_im1: df.at[idx, '画像1'] = convert_image(n_im1)
                                     if n_im2: df.at[idx, '画像2'] = convert_image(n_im2)
-                                    save_all_data(df); st.success("更新完了！"); st.rerun()
+                                    save_all_data(df); st.success("保存完了！"); st.rerun()
 
         with tabs[2]: # ➕ 新規登録
             st.markdown("### 📝 新規個体登録")
             this_year = datetime.now().year
-            sel_y = st.selectbox("誕生年を選択", [str(y) for y in range(this_year, this_year - 15, -1)])
+            sel_y = st.selectbox("誕生年を選択", [str(y) for y in range(this_year, this_year - 15, -1)], key="reg_year")
+            
             prefix = sel_y[2:]
-            if not df.empty:
-                count = len(df[df["ID"].astype(str).str.startswith(prefix)])
-            else: count = 0
+            count = len(df[df["ID"].astype(str).str.startswith(prefix)]) if not df.empty else 0
             default_id = f"{prefix}{count+1:03d}"
             
             with st.form("reg_form", clear_on_submit=True):
@@ -244,12 +248,10 @@ def main():
                             "画像1":convert_image(im1), "画像2":convert_image(im2), "備考":no, "非公開": str(is_p)
                         }
                         save_all_data(pd.concat([df, pd.DataFrame([new_row])], ignore_index=True))
-                        st.success(f"ID {id_v} を保存完了！"); st.rerun()
+                        st.success(f"ID {id_v} 保存完了！"); st.rerun()
 
         with tabs[3]: # 🖨️ ラベル生成
-            st.markdown("### 🖨️ ラベル作成")
-            if df.empty: st.warning("データがありません")
-            else:
+            if not df.empty:
                 target = st.selectbox("個体を選択", df['ID'].astype(str) + " : " + df['モルフ'])
                 if st.button("生成"):
                     tid = target.split(" : ")[0]
