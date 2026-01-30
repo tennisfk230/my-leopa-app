@@ -7,6 +7,7 @@ import base64
 import os
 from datetime import datetime
 import io
+import requests
 
 # QRコードライブラリ
 try:
@@ -20,6 +21,10 @@ except ImportError:
 ADMIN_PASSWORD = "lucafk"
 VIEW_PASSWORD = "andgekko"
 SPREADSHEET_NAME = "leopa_database"
+
+# Cloudinary設定（Secretsから読み込み）
+CLOUDINARY_URL = f"https://api.cloudinary.com/v1_1/{st.secrets['CLOUDINARY_CLOUD_NAME']}/image/upload"
+UPLOAD_PRESET = st.secrets['CLOUDINARY_UPLOAD_PRESET']
 
 st.set_page_config(page_title="&Gekko System", layout="wide", page_icon="🦎")
 
@@ -62,29 +67,32 @@ def save_all_data(df):
     data = [df.columns.values.tolist()] + df.astype(str).values.tolist()
     sheet.update(range_name='A1', values=data)
 
-# ✅ ここに二段階の圧縮機能を追加しました
+# ✅ Cloudinaryに高画質でアップロードする関数
 def convert_image(file):
     if file:
         try:
+            # 画像の向き修正
             img = Image.open(file)
             if hasattr(img, '_getexif'): img = ImageOps.exif_transpose(img)
-            if img.mode != 'RGB': img = img.convert('RGB')
             
-            # 1段目：400px, 画質40
-            img.thumbnail((400, 400))
+            # メモリ上に保存（JPEG, 画質85の高画質）
             buf = io.BytesIO()
-            img.save(buf, format="JPEG", quality=40, optimize=True)
-            b_str = base64.b64encode(buf.getvalue()).decode()
+            img.save(buf, format="JPEG", quality=85, optimize=True)
+            buf.seek(0)
             
-            # 2段目：40,000文字を超えた場合、200px, 画質30まで落とす
-            if len(b_str) > 40000:
-                img.thumbnail((200, 200))
-                buf = io.BytesIO()
-                img.save(buf, format="JPEG", quality=30)
-                b_str = base64.b64encode(buf.getvalue()).decode()
+            # Cloudinaryへリクエスト送信
+            files = {"file": buf}
+            data = {"upload_preset": UPLOAD_PRESET}
+            res = requests.post(CLOUDINARY_URL, files=files, data=data)
             
-            return b_str
-        except: return ""
+            if res.status_code == 200:
+                return res.json().get("secure_url") # 保存された画像のURLを返す
+            else:
+                st.error("アップロード失敗。設定を確認してください。")
+                return ""
+        except Exception as e:
+            st.error(f"エラー: {e}")
+            return ""
     return ""
 
 def create_label_image(id_val, morph, birth, quality):
@@ -162,8 +170,14 @@ def main():
             for i, (idx, row) in enumerate(view_df.iterrows()):
                 s_cls = "male" if row['性別'] == "オス" else "female" if row['性別'] == "メス" else "unknown"
                 s_icon = "♂" if row['性別'] == "オス" else "♀" if row['性別'] == "メス" else "?"
+                
+                # 画像URLの処理（古いBase64データか、新しいURLかを判別）
+                img_src = row.get("画像1","")
+                if img_src and not img_src.startswith("http"):
+                    img_src = f"data:image/jpeg;base64,{img_src}"
+
                 with cols[i % 2]:
-                    st.markdown(f'<div class="leopa-card"><div class="img-container"><span class="badge-quality">{row.get("クオリティ","-")}</span><span class="badge-sex {s_cls}">{s_icon}</span><img src="data:image/jpeg;base64,{row.get("画像1","")}"></div><div style="padding:10px;"><b>ID: {row.get("ID","-")}</b><br>{row.get("モルフ","-")}</div></div>', unsafe_allow_html=True)
+                    st.markdown(f'<div class="leopa-card"><div class="img-container"><span class="badge-quality">{row.get("クオリティ","-")}</span><span class="badge-sex {s_cls}">{s_icon}</span><img src="{img_src}"></div><div style="padding:10px;"><b>ID: {row.get("ID","-")}</b><br>{row.get("モルフ","-")}</div></div>', unsafe_allow_html=True)
                     
                     with st.expander("詳細 / 編集"):
                         if st.session_state["is_admin"]:
@@ -175,13 +189,20 @@ def main():
                             with t1:
                                 st.write(f"誕生日: {row.get('生年月日','-')}")
                                 st.write(f"備考: {row.get('備考','-')}")
-                                if row.get("画像2"): st.image(f"data:image/jpeg;base64,{row['画像2']}", use_container_width=True)
+                                img2_src = row.get("画像2")
+                                if img2_src:
+                                    if not img2_src.startswith("http"): img2_src = f"data:image/jpeg;base64,{img2_src}"
+                                    st.image(img2_src, use_container_width=True)
                             with t2:
                                 st.write(f"父親: {row.get('父親ID','-')} ({row.get('父親モルフ','-')})")
                                 st.write(f"母親: {row.get('母親ID','-')} ({row.get('母親モルフ','-')})")
+                            
                             if st.session_state["is_admin"]:
-                                if st.button("🗑️ 削除", key=f"del_{idx}"):
-                                    save_all_data(df.drop(idx)); st.rerun()
+                                st.markdown("---")
+                                with st.popover("🗑️ データを削除する"):
+                                    st.warning("本当にこの個体を削除してもよろしいですか？")
+                                    if st.button("はい、削除します", key=f"del_{idx}", type="primary"):
+                                        save_all_data(df.drop(idx)); st.rerun()
                         else:
                             with st.form(f"edit_{idx}"):
                                 n_id = st.text_input("個体ID", value=row['ID'])
@@ -242,10 +263,12 @@ def main():
                 if st.form_submit_button("登録する"):
                     if not im1: st.error("画像1は必須です")
                     else:
+                        img1_url = convert_image(im1)
+                        img2_url = convert_image(im2) if im2 else ""
                         new_row = {
                             "ID":id_v, "モルフ":mo, "生年月日":bi_s, "性別":ge, "クオリティ":qu,
                             "父親ID":f_id, "父親モルフ":f_mo, "母親ID":m_id, "母親モルフ":m_mo,
-                            "画像1":convert_image(im1), "画像2":convert_image(im2), "備考":no, "非公開": str(is_p)
+                            "画像1":img1_url, "画像2":img2_url, "備考":no, "非公開": str(is_p)
                         }
                         save_all_data(pd.concat([df, pd.DataFrame([new_row])], ignore_index=True))
                         st.success(f"ID {id_v} 保存完了！"); st.rerun()
