@@ -17,11 +17,12 @@ except ImportError:
     HAS_QR = False
 
 # --- 1. 設定 ---
-ADMIN_PASSWORD = "lucafk"  # 管理者パスワード
-VIEW_PASSWORD = "andgekko"   # 閲覧用パスワード
+# 運用に合わせて書き換えてください
+ADMIN_PASSWORD = "lucafk"
+VIEW_PASSWORD = "andgekko"
 SPREADSHEET_NAME = "leopa_database"
 
-# Cloudinary設定
+# Cloudinary設定（Secretsから読み込み）
 CLOUDINARY_URL = f"https://api.cloudinary.com/v1_1/{st.secrets.get('CLOUDINARY_CLOUD_NAME', '')}/image/upload"
 UPLOAD_PRESET = st.secrets.get('CLOUDINARY_UPLOAD_PRESET', '')
 
@@ -121,7 +122,7 @@ def main():
             else: st.error("パスワードが違います")
         return
 
-    # データ読み込み
+    # データ一括読み込み
     df_leopa = load_data()
     df_logs = load_data("care_logs")
 
@@ -131,23 +132,7 @@ def main():
 
     tabs = st.tabs(["📊 ダッシュボード", "🦎 検索・アルバム", "📝 お世話記録", "➕ 新規登録", "🖨️ ラベル生成"])
 
-    # --- 0. ダッシュボード ---
-    with tabs[0]:
-        if df_leopa.empty:
-            st.info("データがありません")
-        else:
-            c1, c2, c3 = st.columns(3)
-            c1.metric("総飼育数", f"{len(df_leopa)}匹")
-            m_count = len(df_leopa[df_leopa['性別'] == 'オス'])
-            f_count = len(df_leopa[df_leopa['性別'] == 'メス'])
-            c2.metric("♂/♀", f"{m_count} / {f_count}")
-            today_str = datetime.now().strftime("%Y/%m/%d")
-            recent_count = len(df_logs[df_logs['日付'] == today_str]) if not df_logs.empty else 0
-            c3.metric("今日のお世話", f"{recent_count}件")
-            st.subheader("モルフ分布")
-            st.bar_chart(df_leopa['モルフ'].value_counts())
-
-    # --- 1. 検索・詳細 ---
+    # --- Tab 1: 検索・詳細 ---
     with tabs[1]:
         search_text = st.text_input("🔍 IDやモルフで検索")
         v_df = df_leopa.copy()
@@ -167,16 +152,30 @@ def main():
                     st.markdown(f'<div class="leopa-card"><div class="img-container"><span class="badge-quality">{row.get("クオリティ","-")}</span><span class="badge-sex {s_cls}">{row["性別"]}</span><img src="{img}"></div><div style="padding:10px;"><b>ID: {row["ID"]}</b><br>{row["モルフ"]}</div></div>', unsafe_allow_html=True)
                     
                     with st.expander("詳細と履歴"):
+                        # --- 指定の順番で情報を表示 ---
                         st.write(f"**生年月日:** {row.get('生年月日','-')}")
+                        
+                        # 間に家系情報を挿入
+                        st.write(f"**父親モルフ:** {row.get('父親モルフ','-')}")
+                        st.write(f"**父親ID:** {row.get('父親ID','-')}")
+                        st.write(f"**母親モルフ:** {row.get('母親モルフ','-')}")
+                        st.write(f"**母親ID:** {row.get('母親ID','-')}")
+                        
                         st.write(f"**備考:** {row.get('備考','-')}")
+
+                        # サブ画像があれば表示
+                        img2 = row.get("画像2", "")
+                        if img2:
+                            if not img2.startswith("http"): img2 = f"data:image/jpeg;base64,{img2}"
+                            st.image(img2, caption="サブ画像", use_container_width=True)
                         
                         st.markdown("---")
                         
+                        # --- お世話履歴表示 ---
                         if not df_logs.empty:
-                            # この個体の全ログを取得
                             my_full_logs = df_logs[df_logs['ID'].astype(str) == str(row['ID'])].sort_values('日付', ascending=False)
                             
-                            # 1. 給餌履歴のみ抽出 (5回分)
+                            # 給餌記録 (5回分)
                             st.write("**🍖 過去5回の給餌記録**")
                             my_feeds = my_full_logs[my_full_logs['項目'] == '給餌'].head(5)
                             if my_feeds.empty:
@@ -185,8 +184,8 @@ def main():
                                 for _, l in my_feeds.iterrows():
                                     st.markdown(f'<div class="care-log-entry">📅 {l["日付"]} | {l["内容"]}</div>', unsafe_allow_html=True)
                             
+                            # その他履歴
                             st.write("**📋 その他・全履歴**")
-                            # 2. 全ジャンルの直近を表示
                             for _, l in my_full_logs.head(3).iterrows():
                                 tag_map = {"給餌": "tag-feed", "掃除": "tag-clean", "交配": "tag-mate", "排卵(クラッチ)": "tag-ovul", "メモ": "tag-memo"}
                                 tag_class = tag_map.get(l['項目'], "tag-memo")
@@ -194,54 +193,57 @@ def main():
                         else:
                             st.caption("お世話記録がありません")
 
-    # --- 2. お世話記録 ---
+    # --- Tab 0: ダッシュボード ---
+    with tabs[0]:
+        if df_leopa.empty: st.info("データがありません")
+        else:
+            c1, c2, c3 = st.columns(3)
+            c1.metric("総飼育数", f"{len(df_leopa)}匹")
+            m_count = len(df_leopa[df_leopa['性別'] == 'オス'])
+            f_count = len(df_leopa[df_leopa['性別'] == 'メス'])
+            c2.metric("♂/♀", f"{m_count} / {f_count}")
+            today_str = datetime.now().strftime("%Y/%m/%d")
+            recent_count = len(df_logs[df_logs['日付'] == today_str]) if not df_logs.empty else 0
+            c3.metric("今日のお世話", f"{recent_count}件")
+            st.subheader("モルフ分布")
+            st.bar_chart(df_leopa['モルフ'].value_counts())
+
+    # --- Tab 2: お世話記録 ---
     with tabs[2]:
-        if not st.session_state["is_admin"]:
-            st.warning("管理者のみ可能です")
-        elif df_leopa.empty:
-            st.info("個体を追加してください")
+        if not st.session_state["is_admin"]: st.warning("管理者のみ可能です")
+        elif df_leopa.empty: st.info("個体を追加してください")
         else:
             st.subheader("📝 お世話の入力")
-            with st.form("care_form_v5"):
+            with st.form("care_form_v7"):
                 col1, col2 = st.columns(2)
                 with col1:
                     selected_ids = st.multiselect("対象個体", options=df_leopa['ID'].tolist())
                     log_date = st.date_input("日付", datetime.now())
                 
-                # メス判定ロジック
                 is_all_female = False
                 if selected_ids:
                     selected_gekkos = df_leopa[df_leopa['ID'].isin(selected_ids)]
-                    if all(selected_gekkos['性別'] == 'メス'):
-                        is_all_female = True
+                    if all(selected_gekkos['性別'] == 'メス'): is_all_female = True
                 
                 care_options = ["給餌", "掃除", "交配", "メモ"]
-                if is_all_female:
-                    care_options.insert(3, "排卵(クラッチ)")
+                if is_all_female: care_options.insert(3, "排卵(クラッチ)")
                 
                 with col2:
                     log_item = st.selectbox("項目", care_options)
                     log_note = st.text_input("内容")
                 
                 if st.form_submit_button("記録を保存"):
-                    if not selected_ids:
-                        st.error("個体を選択してください")
+                    if not selected_ids: st.error("個体を選択してください")
                     else:
                         new_logs = []
                         for tid in selected_ids:
-                            new_logs.append({
-                                "ID": tid,
-                                "日付": log_date.strftime("%Y/%m/%d"),
-                                "項目": log_item,
-                                "内容": log_note
-                            })
+                            new_logs.append({"ID": tid, "日付": log_date.strftime("%Y/%m/%d"), "項目": log_item, "内容": log_note})
                         save_all_data(pd.concat([df_logs, pd.DataFrame(new_logs)], ignore_index=True), "care_logs")
                         st.success(f"{len(selected_ids)}件保存しました")
                         st.rerun()
 
-            st.markdown("---")
-            st.subheader("📋 履歴一覧")
             if not df_logs.empty:
+                st.subheader("📋 履歴一覧")
                 st.dataframe(df_logs.sort_values('日付', ascending=False), use_container_width=True, hide_index=True)
 
     # --- Tab 3: 新規登録 ---
@@ -254,7 +256,7 @@ def main():
             count = len(df_leopa[df_leopa["ID"].astype(str).str.startswith(prefix)]) if not df_leopa.empty else 0
             def_id = f"{prefix}{count+1:03d}"
 
-            with st.form("reg_v5"):
+            with st.form("reg_v7"):
                 p_check = st.checkbox("非公開")
                 c1, c2 = st.columns(2)
                 with c1:
@@ -263,29 +265,33 @@ def main():
                     i_ge = st.selectbox("性別", ["不明", "オス", "メス"])
                     i_qu = st.select_slider("クオリティ", options=["S", "A", "B", "C"], value="A")
                 i_bi = st.text_input("生年月日", value=f"{sel_y}/")
+                st.write("家系情報入力")
                 c3, c4 = st.columns(2)
                 with c3:
-                    f_id = st.text_input("父親ID"); f_mo = st.text_input("父親モルフ")
+                    f_mo_in = st.text_input("父親モルフ"); f_id_in = st.text_input("父親ID")
                 with c4:
-                    m_id = st.text_input("母親ID"); m_mo = st.text_input("母親モルフ")
+                    m_mo_in = st.text_input("母親モルフ"); m_id_in = st.text_input("母親ID")
                 i_im1 = st.file_uploader("画像1 (必須)", type=["jpg","jpeg","png"])
+                i_im2 = st.file_uploader("画像2 (任意)", type=["jpg","jpeg","png"])
                 i_no = st.text_area("備考")
                 if st.form_submit_button("登録"):
                     if not i_im1: st.error("画像が必要です")
                     else:
-                        img_url = upload_image(i_im1)
+                        url1 = upload_image(i_im1)
+                        url2 = upload_image(i_im2) if i_im2 else ""
                         new_row = {
                             "ID": i_id, "モルフ": i_mo, "生年月日": i_bi, "性別": i_ge, "クオリティ": i_qu,
-                            "父親ID": f_id, "父親モルフ": f_mo, "母親ID": m_id, "母親モルフ": m_mo,
-                            "画像1": img_url, "備考": i_no, "非公開": str(p_check)
+                            "父親モルフ": f_mo_in, "父親ID": f_id_in, "母親モルフ": m_mo_in, "母親ID": m_id_in,
+                            "画像1": url1, "画像2": url2, "備考": i_no, "非公開": str(p_check)
                         }
                         save_all_data(pd.concat([df_leopa, pd.DataFrame([new_row])], ignore_index=True))
                         st.rerun()
+        else: st.warning("管理者のみ可能です")
 
     # --- Tab 4: ラベル生成 ---
     with tabs[4]:
         if not df_leopa.empty:
-            target = st.selectbox("個体選択", df_leopa['ID'].astype(str) + " : " + df_leopa['モルフ'])
+            target = st.selectbox("ラベル用個体選択", df_leopa['ID'].astype(str) + " : " + df_leopa['モルフ'])
             if st.button("ラベル生成"):
                 tid = target.split(" : ")[0]
                 row = df_leopa[df_leopa['ID'].astype(str) == tid].iloc[0]
