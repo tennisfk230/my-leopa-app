@@ -20,20 +20,20 @@ SPREADSHEET_NAME = "leopa_database"
 LOGO_URL = "logo_gekko.png" 
 PLACEHOLDER_IMAGE = "https://via.placeholder.com/400x400?text=No+Image"
 
-# 列順を固定
+# スプレッドシートの列順を厳密に固定
 COLUMNS = [
     "ID", "モルフ", "生年月日", "性別", "クオリティ",
     "父親ID", "父親モルフ", "母親ID", "母親モルフ",
     "画像1", "画像2", "備考", "非公開"
 ]
 
-# Secrets
+# Secretsから設定を読み込み
 CLOUDINARY_URL = f"https://api.cloudinary.com/v1_1/{st.secrets.get('CLOUDINARY_CLOUD_NAME', '')}/image/upload"
 UPLOAD_PRESET = st.secrets.get('CLOUDINARY_UPLOAD_PRESET', '')
 
 st.set_page_config(page_title="&Gekko System", layout="wide", page_icon="🦎")
 
-# --- 2. スタイル定義 ---
+# --- 2. デザイン定義 ---
 st.markdown("""
     <style>
     .stApp { background-color: #f8f9fa; }
@@ -61,28 +61,29 @@ st.markdown("""
 
 def get_gspread_client():
     try:
-        info = json.loads(st.secrets["GCP_SERVICE_ACCOUNT_JSON"])
-        creds = Credentials.from_service_account_info(info, scopes=["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"])
+        service_account_info = json.loads(st.secrets["GCP_SERVICE_ACCOUNT_JSON"])
+        creds = Credentials.from_service_account_info(service_account_info, scopes=["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"])
         return gspread.authorize(creds)
-    except:
+    except Exception as e:
         return None
 
 def load_data(sheet_name=None):
     client = get_gspread_client()
-    if not client: return pd.DataFrame()
+    if not client: return pd.DataFrame(columns=COLUMNS if not sheet_name else [])
     try:
         sh = client.open(SPREADSHEET_NAME)
-        # シート名指定がある場合はそちら、ない場合は最初のシート
-        ws = sh.worksheet(sheet_name) if sheet_name else sh.get_worksheet(0)
-        data = ws.get_all_records()
+        sheet = sh.worksheet(sheet_name) if sheet_name else sh.get_worksheet(0)
+        data = sheet.get_all_records()
         df = pd.DataFrame(data)
-        if not sheet_name: # メインシートならカラム保証
+        if not sheet_name:
+            # 必須カラムを保証
             for col in COLUMNS:
                 if col not in df.columns: df[col] = ""
             return df[COLUMNS]
         return df
     except:
-        return pd.DataFrame()
+        # データがない場合は空のDataFrameを返す
+        return pd.DataFrame(columns=COLUMNS if not sheet_name else [])
 
 def save_all_data(df, sheet_name=None):
     client = get_gspread_client()
@@ -90,13 +91,13 @@ def save_all_data(df, sheet_name=None):
     try:
         sh = client.open(SPREADSHEET_NAME)
         try:
-            ws = sh.worksheet(sheet_name) if sheet_name else sh.get_worksheet(0)
+            sheet = sh.worksheet(sheet_name) if sheet_name else sh.get_worksheet(0)
         except:
-            ws = sh.add_worksheet(title=sheet_name, rows=1000, cols=20)
-        ws.clear()
+            sheet = sh.add_worksheet(title=sheet_name, rows=1000, cols=20)
+        sheet.clear()
         df_save = df.fillna("").astype(str)
         data = [df_save.columns.values.tolist()] + df_save.values.tolist()
-        ws.update(range_name='A1', values=data)
+        sheet.update(range_name='A1', values=data)
         return True
     except:
         return False
@@ -137,61 +138,78 @@ def create_label_image(id_val, morph, birth, quality):
     img.save(buf, format="PNG")
     return buf.getvalue()
 
-# --- 4. メイン ---
+# --- 4. メイン処理 ---
 def main():
     st.markdown('<div class="header-container">', unsafe_allow_html=True)
     try:
         st.image(LOGO_URL, width=300)
     except:
-        st.markdown('<h1 style="color:#81d1d1;">&Gekko System</h1>', unsafe_allow_html=True)
+        st.markdown('<h1 style="color:#81d1d1; text-align:center;">&Gekko System</h1>', unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
     if "logged_in" not in st.session_state:
         st.session_state.update({"logged_in": False, "is_admin": False})
 
+    # --- ログイン画面 ---
     if not st.session_state["logged_in"]:
         st.write("### 🔐 MEMBER LOGIN")
-        pwd = st.text_input("パスワードを入力", type="password")
+        pwd = st.text_input("パスワードを入力してください", type="password")
         if st.button("ログイン"):
             if pwd == st.secrets.get("ADMIN_PASSWORD"):
                 st.session_state.update({"logged_in": True, "is_admin": True}); st.rerun()
             elif pwd == st.secrets.get("VIEW_PASSWORD"):
                 st.session_state.update({"logged_in": True, "is_admin": False}); st.rerun()
-            else: st.error("パスワードが違います")
+            else: st.error("パスワードが正しくありません")
         return
 
+    # データ一括ロード
     df = load_data()
     df_logs = load_data("care_logs")
     is_admin = st.session_state["is_admin"]
 
+    # 非公開個体の閲覧制限
     if not df.empty and not is_admin:
         df = df[df["非公開"].astype(str).str.lower() != "true"]
 
     tabs = st.tabs(["📊 ダッシュボード", "🦎 検索・アルバム", "📝 お世話記録", "➕ 新規登録", "🖨️ ラベル生成"])
 
-    with tabs[0]: # Dashboard
-        if df.empty: st.info("個体データがありません")
+    # --- 0. ダッシュボード ---
+    with tabs[0]:
+        if df.empty:
+            st.info("データがありません。個体を登録してください。")
         else:
             st.metric("総飼育数", f"{len(df)}匹")
             st.bar_chart(df['モルフ'].value_counts())
 
-    with tabs[1]: # Album
-        s_query = st.text_input("🔍 検索")
+    # --- 1. 検索・詳細 ---
+    with tabs[1]:
+        s_query = st.text_input("🔍 個体IDやモルフで検索")
         view_df = df.copy()
         if not view_df.empty and s_query:
             view_df = view_df[view_df['ID'].astype(str).str.contains(s_query, case=False) | view_df['モルフ'].astype(str).str.contains(s_query, case=False)]
-        
-        if view_df.empty: st.info("表示できる個体がありません")
+
+        if view_df.empty:
+            st.info("表示できる個体がいません。")
         else:
             cols = st.columns(2)
             for i, (idx, row) in enumerate(view_df.iterrows()):
-                g_cls = "male" if row['性別'] == "オス" else "female" if row['性別'] == "メス" else "unknown"
+                gender_class = "male" if row['性別'] == "オス" else "female" if row['性別'] == "メス" else "unknown"
                 img_url = row.get("画像1")
                 if not img_url: img_url = PLACEHOLDER_IMAGE
                 elif not str(img_url).startswith("http"): img_url = f"data:image/jpeg;base64,{img_url}"
                 
                 with cols[i % 2]:
-                    st.markdown(f'<div class="leopa-card"><div class="img-container"><span class="badge-quality">{row.get("クオリティ","-")}</span><span class="badge-sex {g_cls}">{row["性別"]}</span><img src="{img_url}"></div><div style="padding:10px;"><b>ID: {row["ID"]}</b><br>{row["モルフ"]}</div></div>', unsafe_allow_html=True)
+                    st.markdown(f"""
+                        <div class="leopa-card">
+                            <div class="img-container">
+                                <span class="badge-quality">{row.get("クオリティ","-")}</span>
+                                <span class="badge-sex {gender_class}">{row["性別"]}</span>
+                                <img src="{img_url}">
+                            </div>
+                            <div style="padding:10px;"><b>ID: {row["ID"]}</b><br>{row["モルフ"]}</div>
+                        </div>
+                    """, unsafe_allow_html=True)
+                    
                     with st.expander("詳細と履歴"):
                         st.write(f"**生年月日:** {row.get('生年月日','-')}")
                         st.write(f"**父親モルフ:** {row.get('父親モルフ','-')}")
@@ -204,81 +222,115 @@ def main():
                         if img2:
                             if not str(img2).startswith("http"): img2 = f"data:image/jpeg;base64,{img2}"
                             st.image(img2, use_container_width=True)
-                        
+
                         st.markdown("---")
-                        if not df_logs.empty:
+                        # 履歴表示
+                        if not df_logs.empty and "ID" in df_logs.columns:
                             my_logs = df_logs[df_logs['ID'].astype(str) == str(row['ID'])].sort_values('日付', ascending=False)
                             st.write("**🍖 直近5回の給餌**")
                             feeds = my_logs[my_logs['項目'] == '給餌'].head(5)
-                            if feeds.empty: st.caption("記録なし")
+                            if feeds.empty: st.caption("給餌記録なし")
                             else:
-                                for _, l in feeds.iterrows(): st.markdown(f'<div class="care-log-entry">📅 {l["日付"]} | {l["内容"]}</div>', unsafe_allow_html=True)
-                            st.write("**📋 最近の全履歴**")
+                                for _, l in feeds.iterrows():
+                                    st.markdown(f'<div class="care-log-entry">📅 {l["日付"]} | {l["内容"]}</div>', unsafe_allow_html=True)
+                            
+                            st.write("**📋 その他履歴**")
                             for _, l in my_logs.head(3).iterrows():
-                                tag_map = {"給餌": "tag-feed", "掃除": "tag-clean", "交配": "tag-mate", "排卵(クラッチ)": "tag-ovul", "メモ": "tag-memo"}
-                                tag_class = tag_map.get(l['項目'], "tag-memo")
-                                st.markdown(f'<div class="care-log-entry">📅 {l["日付"]} <span class="log-item-tag {tag_class}">{l["項目"]}</span> {l["内容"]}</div>', unsafe_allow_html=True)
+                                t_map = {"給餌": "tag-feed", "掃除": "tag-clean", "交配": "tag-mate", "排卵(クラッチ)": "tag-ovul", "メモ": "tag-memo"}
+                                t_cls = t_map.get(l['項目'], "tag-memo")
+                                st.markdown(f'<div class="care-log-entry">📅 {l["日付"]} <span class="log-item-tag {t_cls}">{l["項目"]}</span> {l["内容"]}</div>', unsafe_allow_html=True)
+                        else:
+                            st.caption("お世話記録がありません")
 
                         if is_admin:
                             if st.toggle("✏️ 編集", key=f"e_{idx}"):
                                 with st.form(f"fe_{idx}"):
-                                    c_id = st.text_input("ID", value=row['ID'])
-                                    c_mo = st.text_input("モルフ", value=row['モルフ'])
-                                    c_se = st.selectbox("性別", ["不明", "オス", "メス"], index=["不明", "オス", "メス"].index(row['性別']))
-                                    c_bi = st.text_input("生年月日", value=row['生年月日'])
-                                    c_qu = st.select_slider("ランク", options=["S", "A", "B", "C"], value=row['クオリティ'])
-                                    c_fi = st.text_input("父ID", value=row['父親ID'])
-                                    c_fm = st.text_input("父モルフ", value=row['父親モルフ'])
-                                    c_mi = st.text_input("母ID", value=row['母親ID'])
-                                    c_mm = st.text_input("母モルフ", value=row['母親モルフ'])
-                                    c_no = st.text_area("備考", value=row['備考'])
-                                    c_pv = st.checkbox("非公開", value=(str(row['非公開']).lower() == "true"))
+                                    ce1, ce2 = st.columns(2)
+                                    with ce1:
+                                        e_id = st.text_input("ID", value=row['ID'])
+                                        e_mo = st.text_input("モルフ", value=row['モルフ'])
+                                        e_se = st.selectbox("性別", ["不明", "オス", "メス"], index=["不明", "オス", "メス"].index(row['性別']))
+                                    with ce2:
+                                        e_bi = st.text_input("生年月日", value=row['生年月日'])
+                                        e_qu = st.select_slider("ランク", options=["S", "A", "B", "C"], value=row['クオリティ'])
+                                        e_pv = st.checkbox("非公開", value=(str(row['非公開']).lower() == "true"))
+                                    st.write("家系情報修正")
+                                    ef, em = st.columns(2)
+                                    with ef:
+                                        e_fid = st.text_input("父ID", value=row['父親ID'])
+                                        e_fmo = st.text_input("父モルフ", value=row['父親モルフ'])
+                                    with em:
+                                        e_mid = st.text_input("母ID", value=row['母親ID'])
+                                        e_mmo = st.text_input("母モルフ", value=row['母親モルフ'])
+                                    e_no = st.text_area("備考", value=row['備考'])
                                     if st.form_submit_button("保存"):
-                                        df.loc[idx, COLUMNS] = [c_id, c_mo, c_bi, c_se, c_qu, c_fi, c_fm, c_mi, c_mm, row['画像1'], row['画像2'], c_no, str(c_pv)]
+                                        df.loc[idx, COLUMNS] = [e_id, e_mo, e_bi, e_se, e_qu, e_fid, e_fmo, e_mid, e_mmo, row['画像1'], row['画像2'], e_no, str(e_pv)]
                                         save_all_data(df); st.rerun()
-                                if st.button("🗑️ 削除", key=f"d_{idx}"): save_all_data(df.drop(idx)); st.rerun()
+                                if st.button("🗑️ 削除", key=f"d_{idx}"):
+                                    save_all_data(df.drop(idx)); st.rerun()
 
-    with tabs[2]: # Care
+    # --- 2. お世話記録 ---
+    with tabs[2]:
         if is_admin:
             st.subheader("📝 記録入力")
-            if df.empty: st.warning("個体データがありません")
+            if df.empty:
+                st.warning("まず個体データを登録してください。")
             else:
-                with st.form("care"):
-                    s_ids = st.multiselect("個体選択", options=df['ID'].tolist())
+                with st.form("care_form"):
+                    s_ids = st.multiselect("対象個体を選択", options=df['ID'].tolist())
                     l_date = st.date_input("日付", datetime.now())
                     is_f = all(df[df['ID'].isin(s_ids)]['性別'] == 'メス') if s_ids else False
                     opts = ["給餌", "掃除", "交配", "メモ"]
                     if is_f: opts.insert(3, "排卵(クラッチ)")
                     l_item = st.selectbox("項目", opts)
                     l_note = st.text_input("内容")
-                    if st.form_submit_button("保存"):
+                    if st.form_submit_button("記録を保存"):
                         if not s_ids: st.error("個体を選んでください")
                         else:
-                            new = [{"ID": i, "日付": l_date.strftime("%Y/%m/%d"), "項目": l_item, "内容": l_note} for i in s_ids]
-                            save_all_data(pd.concat([df_logs, pd.DataFrame(new)], ignore_index=True), "care_logs"); st.rerun()
+                            new_logs = [{"ID": i, "日付": l_date.strftime("%Y/%m/%d"), "項目": l_item, "内容": l_note} for i in s_ids]
+                            save_all_data(pd.concat([df_logs, pd.DataFrame(new_logs)], ignore_index=True), "care_logs")
+                            st.success("記録完了！"); st.rerun()
 
-    with tabs[3]: # Register
+    # --- 3. 新規登録 ---
+    with tabs[3]:
         if is_admin:
-            with st.form("reg"):
-                col1, col2 = st.columns(2)
-                with col1: rid = st.text_input("ID"); rmo = st.text_input("モルフ"); rse = st.selectbox("性別", ["不明", "オス", "メス"])
-                with col2: rbi = st.text_input("生年月日 (YYYY/MM/DD)"); rqu = st.select_slider("ランク", options=["S", "A", "B", "C"], value="A"); rpv = st.checkbox("非公開")
+            st.subheader("➕ 新規個体登録")
+            with st.form("reg_form"):
+                c1, c2 = st.columns(2)
+                with c1:
+                    rid = st.text_input("ID")
+                    rmo = st.text_input("モルフ")
+                    rse = st.selectbox("性別", ["不明", "オス", "メス"])
+                with c2:
+                    rbi = st.text_input("生年月日 (YYYY/MM/DD)")
+                    rqu = st.select_slider("ランク", options=["S", "A", "B", "C"], value="A")
+                    rpv = st.checkbox("非公開設定")
+                st.write("家系情報")
                 cf, cm = st.columns(2)
                 with cf: rfmo = st.text_input("父モルフ"); rfid = st.text_input("父ID")
                 with cm: rmmo = st.text_input("母モルフ"); rmid = st.text_input("母ID")
-                ri1 = st.file_uploader("画像1"); ri2 = st.file_uploader("画像2"); rno = st.text_area("備考")
-                if st.form_submit_button("登録"):
-                    u1 = upload_to_cloudinary(ri1); u2 = upload_to_cloudinary(ri2) if ri2 else ""
-                    new = {"ID":rid,"モルフ":rmo,"生年月日":rbi,"性別":rse,"クオリティ":rqu,"父親ID":rfid,"父親モルフ":rfmo,"母親ID":rmid,"母親モルフ":rmmo,"画像1":u1,"画像2":u2,"備考":rno,"非公開":str(rpv)}
-                    save_all_data(pd.concat([df, pd.DataFrame([new])], ignore_index=True)); st.rerun()
+                ri1 = st.file_uploader("画像1 (必須)", type=["jpg","png"])
+                ri2 = st.file_uploader("画像2", type=["jpg","png"])
+                rno = st.text_area("備考")
+                if st.form_submit_button("登録を実行"):
+                    if not ri1: st.error("メイン画像が必要です")
+                    else:
+                        u1 = upload_to_cloudinary(ri1)
+                        u2 = upload_to_cloudinary(ri2) if ri2 else ""
+                        new = {"ID":rid,"モルフ":rmo,"生年月日":rbi,"性別":rse,"クオリティ":rqu,"父親ID":rfid,"父親モルフ":rfmo,"母親ID":rmid,"母親モルフ":rmmo,"画像1":u1,"画像2":u2,"備考":rno,"非公開":str(rpv)}
+                        save_all_data(pd.concat([df, pd.DataFrame([new])], ignore_index=True)); st.rerun()
 
-    with tabs[4]: # QR
-        if not df.empty:
-            target = st.selectbox("ラベル作成個体", df['ID'].astype(str))
-            if st.button("生成"):
+    # --- 4. ラベル生成 ---
+    with tabs[4]:
+        if df.empty: st.info("個体が登録されていません")
+        else:
+            target = st.selectbox("ラベル作成対象", options=df['ID'].astype(str))
+            if st.button("ラベル生成"):
                 r = df[df['ID'].astype(str) == target].iloc[0]
                 lbl = create_label_image(r['ID'], r['モルフ'], r.get('生年月日','-'), r.get('クオリティ','A'))
-                st.image(lbl, width=400)
+                if lbl:
+                    st.image(lbl, width=400)
+                    st.download_button("保存", lbl, f"label_{target}.png")
 
 if __name__ == "__main__":
     main()
