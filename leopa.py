@@ -58,7 +58,6 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # --- 3. 共通関数 ---
-
 def get_gspread_client():
     try:
         service_account_info = json.loads(st.secrets["GCP_SERVICE_ACCOUNT_JSON"])
@@ -76,13 +75,11 @@ def load_data(sheet_name=None):
         data = sheet.get_all_records()
         df = pd.DataFrame(data)
         if not sheet_name:
-            # 必須カラムを保証
             for col in COLUMNS:
                 if col not in df.columns: df[col] = ""
             return df[COLUMNS]
         return df
     except:
-        # データがない場合は空のDataFrameを返す
         return pd.DataFrame(columns=COLUMNS if not sheet_name else [])
 
 def save_all_data(df, sheet_name=None):
@@ -150,7 +147,6 @@ def main():
     if "logged_in" not in st.session_state:
         st.session_state.update({"logged_in": False, "is_admin": False})
 
-    # --- ログイン画面 ---
     if not st.session_state["logged_in"]:
         st.write("### 🔐 MEMBER LOGIN")
         pwd = st.text_input("パスワードを入力してください", type="password")
@@ -162,12 +158,10 @@ def main():
             else: st.error("パスワードが正しくありません")
         return
 
-    # データ一括ロード
     df = load_data()
     df_logs = load_data("care_logs")
     is_admin = st.session_state["is_admin"]
 
-    # 非公開個体の閲覧制限
     if not df.empty and not is_admin:
         df = df[df["非公開"].astype(str).str.lower() != "true"]
 
@@ -176,24 +170,24 @@ def main():
     # --- 0. ダッシュボード ---
     with tabs[0]:
         if df.empty:
-            st.info("データがありません。個体を登録してください。")
+            st.info("データがありません。スプレッドシートの設定を確認するか、個体を登録してください。")
         else:
             st.metric("総飼育数", f"{len(df)}匹")
             st.bar_chart(df['モルフ'].value_counts())
 
     # --- 1. 検索・詳細 ---
     with tabs[1]:
-        s_query = st.text_input("🔍 個体IDやモルフで検索")
+        s_query = st.text_input("🔍 検索 (ID / モルフ)")
         view_df = df.copy()
         if not view_df.empty and s_query:
             view_df = view_df[view_df['ID'].astype(str).str.contains(s_query, case=False) | view_df['モルフ'].astype(str).str.contains(s_query, case=False)]
 
         if view_df.empty:
-            st.info("表示できる個体がいません。")
+            st.write("")
         else:
             cols = st.columns(2)
             for i, (idx, row) in enumerate(view_df.iterrows()):
-                gender_class = "male" if row['性別'] == "オス" else "female" if row['性別'] == "メス" else "unknown"
+                g_cls = "male" if row['性別'] == "オス" else "female" if row['性別'] == "メス" else "unknown"
                 img_url = row.get("画像1")
                 if not img_url: img_url = PLACEHOLDER_IMAGE
                 elif not str(img_url).startswith("http"): img_url = f"data:image/jpeg;base64,{img_url}"
@@ -203,7 +197,7 @@ def main():
                         <div class="leopa-card">
                             <div class="img-container">
                                 <span class="badge-quality">{row.get("クオリティ","-")}</span>
-                                <span class="badge-sex {gender_class}">{row["性別"]}</span>
+                                <span class="badge-sex {g_cls}">{row["性別"]}</span>
                                 <img src="{img_url}">
                             </div>
                             <div style="padding:10px;"><b>ID: {row["ID"]}</b><br>{row["モルフ"]}</div>
@@ -224,7 +218,6 @@ def main():
                             st.image(img2, use_container_width=True)
 
                         st.markdown("---")
-                        # 履歴表示
                         if not df_logs.empty and "ID" in df_logs.columns:
                             my_logs = df_logs[df_logs['ID'].astype(str) == str(row['ID'])].sort_values('日付', ascending=False)
                             st.write("**🍖 直近5回の給餌**")
@@ -239,8 +232,6 @@ def main():
                                 t_map = {"給餌": "tag-feed", "掃除": "tag-clean", "交配": "tag-mate", "排卵(クラッチ)": "tag-ovul", "メモ": "tag-memo"}
                                 t_cls = t_map.get(l['項目'], "tag-memo")
                                 st.markdown(f'<div class="care-log-entry">📅 {l["日付"]} <span class="log-item-tag {t_cls}">{l["項目"]}</span> {l["内容"]}</div>', unsafe_allow_html=True)
-                        else:
-                            st.caption("お世話記録がありません")
 
                         if is_admin:
                             if st.toggle("✏️ 編集", key=f"e_{idx}"):
@@ -274,7 +265,7 @@ def main():
         if is_admin:
             st.subheader("📝 記録入力")
             if df.empty:
-                st.warning("まず個体データを登録してください。")
+                st.warning("個体を登録してください。")
             else:
                 with st.form("care_form"):
                     s_ids = st.multiselect("対象個体を選択", options=df['ID'].tolist())
@@ -295,34 +286,63 @@ def main():
     with tabs[3]:
         if is_admin:
             st.subheader("➕ 新規個体登録")
-            with st.form("reg_form"):
+            
+            # === ID・生年月日 自動生成ロジック ===
+            st.write("▼ **登録前の設定**（ここで選んだ内容が下のフォームに反映されます）")
+            birth_known = st.radio("生年月日の把握状況", ["誕生日（日付）が分かる", "誕生年だけ分かる（月日は不明）"], horizontal=True)
+            
+            if birth_known == "誕生日（日付）が分かる":
+                # カレンダーから日付を選択
+                sel_date = st.date_input("生年月日を選択してください", datetime.now())
+                # YYMMDD形式 (例: 2024年5月10日 -> 240510)
+                def_id = sel_date.strftime("%y%m%d")
+                def_birth = sel_date.strftime("%Y/%m/%d")
+            else:
+                # 過去のロジック：年だけ選んで、連番を振る
+                this_year = datetime.now().year
+                sel_y = st.selectbox("誕生年を選択してください", [str(y) for y in range(this_year, this_year - 15, -1)])
+                prefix = sel_y[2:] # 2024 -> 24
+                # その年で始まるIDの数をカウント
+                count = len(df[df["ID"].astype(str).str.startswith(prefix)]) if not df.empty and "ID" in df.columns else 0
+                # 4桁の連番 (例: 240001)
+                def_id = f"{prefix}{count+1:04d}"
+                def_birth = f"{sel_y}/不明"
+
+            st.write("---")
+            
+            with st.form("reg_form", clear_on_submit=True):
+                st.caption("※ 自動入力されたIDや生年月日は、ここで手動で修正することも可能です。（同腹の個体がいる場合はIDの末尾に -2 などを付けてください）")
                 c1, c2 = st.columns(2)
                 with c1:
-                    rid = st.text_input("ID")
+                    rid = st.text_input("ID", value=def_id)
                     rmo = st.text_input("モルフ")
                     rse = st.selectbox("性別", ["不明", "オス", "メス"])
                 with c2:
-                    rbi = st.text_input("生年月日 (YYYY/MM/DD)")
+                    rbi = st.text_input("生年月日", value=def_birth)
                     rqu = st.select_slider("ランク", options=["S", "A", "B", "C"], value="A")
                     rpv = st.checkbox("非公開設定")
                 st.write("家系情報")
                 cf, cm = st.columns(2)
                 with cf: rfmo = st.text_input("父モルフ"); rfid = st.text_input("父ID")
                 with cm: rmmo = st.text_input("母モルフ"); rmid = st.text_input("母ID")
+                
                 ri1 = st.file_uploader("画像1 (必須)", type=["jpg","png"])
                 ri2 = st.file_uploader("画像2", type=["jpg","png"])
                 rno = st.text_area("備考")
+                
                 if st.form_submit_button("登録を実行"):
                     if not ri1: st.error("メイン画像が必要です")
                     else:
-                        u1 = upload_to_cloudinary(ri1)
-                        u2 = upload_to_cloudinary(ri2) if ri2 else ""
+                        with st.spinner("画像を処理中..."):
+                            u1 = upload_to_cloudinary(ri1)
+                            u2 = upload_to_cloudinary(ri2) if ri2 else ""
                         new = {"ID":rid,"モルフ":rmo,"生年月日":rbi,"性別":rse,"クオリティ":rqu,"父親ID":rfid,"父親モルフ":rfmo,"母親ID":rmid,"母親モルフ":rmmo,"画像1":u1,"画像2":u2,"備考":rno,"非公開":str(rpv)}
-                        save_all_data(pd.concat([df, pd.DataFrame([new])], ignore_index=True)); st.rerun()
+                        save_all_data(pd.concat([df, pd.DataFrame([new])], ignore_index=True))
+                        st.success(f"ID: {rid} を登録しました！"); st.rerun()
 
     # --- 4. ラベル生成 ---
     with tabs[4]:
-        if df.empty: st.info("個体が登録されていません")
+        if df.empty: st.info("個体データがありません")
         else:
             target = st.selectbox("ラベル作成対象", options=df['ID'].astype(str))
             if st.button("ラベル生成"):
